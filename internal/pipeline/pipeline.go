@@ -12,10 +12,12 @@ type Dispatcher interface {
 }
 
 // DispatchContext carries the common identity fields a step passes to DispatchNext.
+// SubjectID names the entity the pipeline runs for (feature-defined); Attributes
+// carries any extra string fields the next stage needs.
 type DispatchContext struct {
-	UserID             string
-	WebEntityID        string
-	WebEntityContextID string
+	UserID     string
+	SubjectID  string
+	Attributes map[string]string
 }
 
 // DispatchFunc overrides the default dispatch behavior for an edge.
@@ -38,9 +40,8 @@ type Edge struct {
 
 // StandardPayload is the default payload dispatched when an edge has no DispatchFunc.
 type StandardPayload struct {
-	WebEntityID        string `json:"webEntityId"`
-	WebEntityContextID string `json:"webEntityContextId"`
-	CompetitorURL      string `json:"competitorUrl,omitempty"`
+	SubjectID  string            `json:"subjectId"`
+	Attributes map[string]string `json:"attributes,omitempty"`
 }
 
 // Pipeline is a DAG of processing stages. Constructed once at service startup via Builder.
@@ -73,8 +74,8 @@ func (p *Pipeline) DispatchNext(ctx context.Context, currentStep ProcessType, dc
 		}
 
 		payload := StandardPayload{
-			WebEntityID:        dc.WebEntityID,
-			WebEntityContextID: dc.WebEntityContextID,
+			SubjectID:  dc.SubjectID,
+			Attributes: dc.Attributes,
 		}
 		if err := p.dispatcher.Dispatch(ctx, string(edge.To), dc.UserID, payload); err != nil {
 			return err

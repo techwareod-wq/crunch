@@ -22,7 +22,6 @@ const (
 	AuthTypeKey
 	DeserializerContextKey
 	LoggerContextKey
-	ActiveCompanyContextKey
 )
 
 const JWTAuthIdentifier = "jwt"

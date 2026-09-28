@@ -9,16 +9,15 @@ import (
 const testValuesYAML = `
 server:
   port: "3090"
-  defaultDBName: "central"
+  defaultDBName: "crunch"
   awsRegion: "ap-south-1"
 async:
   workerCount: 10
   llmWorkerCount: 5
   maxRetries: 3
   shutdownSeconds: 30
-siteIntelligence:
-  scoring:
-    weightVolume: 0.40
+llm:
+  defaultMaxTokens: 5000
 `
 
 // writeValuesFile writes content to <dir>/values/<env>/values.yaml and returns
@@ -52,8 +51,8 @@ func TestLoadValues_ParsesYAML(t *testing.T) {
 	if c.Values.Async.WorkerCount != 10 {
 		t.Errorf("Async.WorkerCount = %d, want 10", c.Values.Async.WorkerCount)
 	}
-	if c.Values.SiteIntelligence.Scoring.WeightVolume != 0.40 {
-		t.Errorf("Scoring.WeightVolume = %v, want 0.40", c.Values.SiteIntelligence.Scoring.WeightVolume)
+	if c.Values.LLM.DefaultMaxTokens != 5000 {
+		t.Errorf("LLM.DefaultMaxTokens = %d, want 5000", c.Values.LLM.DefaultMaxTokens)
 	}
 }
 
@@ -101,132 +100,31 @@ func TestValues_GoldenDefaults(t *testing.T) {
 			}
 			v := c.Values
 
-			// C21: OpenAI fallback model.
+			// OpenAI fallback model.
 			if got := v.LLM.OpenAI.FallbackModel; got != "gpt-4o" {
 				t.Errorf("LLM.OpenAI.FallbackModel = %q, want %q", got, "gpt-4o")
 			}
-			// C22: Gemini fallback model.
+			// Gemini fallback model.
 			if got := v.LLM.Gemini.FallbackModel; got != "gemini-2.0-flash" {
 				t.Errorf("LLM.Gemini.FallbackModel = %q, want %q", got, "gemini-2.0-flash")
 			}
-			// C23: shared HTTP client timeout.
+			// Shared HTTP client timeout.
 			if got := v.APIs.HTTPClient.TimeoutSeconds; got != 60 {
 				t.Errorf("APIs.HTTPClient.TimeoutSeconds = %d, want 60", got)
 			}
-			// C24: post-upgrade publishing cadence.
-			if got := v.Scheduling.UpgradeCadence; got != 15 {
-				t.Errorf("Scheduling.UpgradeCadence = %d, want 15", got)
-			}
-			// C25: plans/roles cache refresh interval.
+			// Roles cache refresh interval.
 			if got := v.Admin.CacheRefreshSeconds; got != 60 {
 				t.Errorf("Admin.CacheRefreshSeconds = %d, want 60", got)
 			}
-			// C26: gated-SQS backpressure pause.
+			// Gated-SQS backpressure pause.
 			if got := v.SQS.GatedPauseSeconds; got != 5 {
 				t.Errorf("SQS.GatedPauseSeconds = %d, want 5", got)
 			}
-			// C27: admin pagination caps.
+			// Admin pagination caps.
 			if got := v.Admin.Pagination; got != (AdminPaginationValues{
 				UsersDefault: 20, UsersMax: 100, AuditDefault: 50, AuditMax: 200,
 			}) {
 				t.Errorf("Admin.Pagination = %+v, want {20 100 50 200}", got)
-			}
-			// C28: article-length multiplier.
-			if got := v.ContentGeneration.ArticleLengthMultiplier; got != 1.25 {
-				t.Errorf("ContentGeneration.ArticleLengthMultiplier = %v, want 1.25", got)
-			}
-		})
-	}
-}
-
-// Strategy resolution: a strategy entry replaces the filter set and overrides
-// only the scoring knobs it lists; unknown strategies fall back to the base
-// (balanced_growth) values.
-func TestSiteIntelligenceValues_StrategyResolution(t *testing.T) {
-	f := func(v float64) *float64 { return &v }
-	base := SiteIntelligenceValues{
-		KeywordFilters: KeywordFilterValues{MaxRankPosition: 30, MinSearchVolume: 100, DifficultyFloor: 5},
-		Scoring:        ScoringValues{VolumeLogAnchor: 100000, WeightVolume: 0.40, WeightDifficulty: 0.40, WeightFunnel: 0.20, OpportunityScale: 100},
-		Strategies: map[string]SIEStrategyValues{
-			"early_footholds": {
-				KeywordFilters: &KeywordFilterValues{MinSearchVolume: 10, MaxSearchVolume: 1000, DifficultyMaxAbsolute: 15},
-				Scoring:        &ScoringOverrideValues{VolumeLogAnchor: f(10000), WeightVolume: f(0.25), WeightDifficulty: f(0.55)},
-			},
-		},
-	}
-
-	t.Run("strategy filters replace the base set", func(t *testing.T) {
-		got := base.FiltersForStrategy("early_footholds")
-		if got.MinSearchVolume != 10 || got.MaxSearchVolume != 1000 || got.DifficultyMaxAbsolute != 15 {
-			t.Errorf("FiltersForStrategy(early_footholds) = %+v, want the override set", got)
-		}
-	})
-
-	t.Run("unknown strategy falls back to base filters", func(t *testing.T) {
-		if got := base.FiltersForStrategy("balanced_growth"); got != base.KeywordFilters {
-			t.Errorf("FiltersForStrategy(balanced_growth) = %+v, want base filters", got)
-		}
-	})
-
-	t.Run("scoring overrides listed knobs and inherits the rest", func(t *testing.T) {
-		got := base.ScoringForStrategy("early_footholds")
-		if got.VolumeLogAnchor != 10000 || got.WeightVolume != 0.25 || got.WeightDifficulty != 0.55 {
-			t.Errorf("ScoringForStrategy overrides not applied: %+v", got)
-		}
-		if got.WeightFunnel != 0.20 || got.OpportunityScale != 100 {
-			t.Errorf("unlisted knobs must inherit the base values: %+v", got)
-		}
-	})
-
-	t.Run("unknown strategy falls back to base scoring", func(t *testing.T) {
-		if got := base.ScoringForStrategy("balanced_growth"); got != base.Scoring {
-			t.Errorf("ScoringForStrategy(balanced_growth) = %+v, want base scoring", got)
-		}
-	})
-}
-
-// Golden guard for the committed early_footholds strategy: the values that
-// implement "vol 10–1000, KD ≤ 15, difficulty-tilted scoring" must survive
-// YAML edits in both environments.
-func TestValues_StrategyGoldenDefaults(t *testing.T) {
-	root := repoRoot(t)
-	for _, env := range []string{"integration", "production"} {
-		t.Run(env, func(t *testing.T) {
-			t.Setenv("VALUES_FILE", filepath.Join(root, "values", env, "values.yaml"))
-
-			var c AppConfig
-			if err := LoadValues(&c); err != nil {
-				t.Fatalf("LoadValues(%s): %v", env, err)
-			}
-			si := c.Values.SiteIntelligence
-
-			filters := si.FiltersForStrategy("early_footholds")
-			want := KeywordFilterValues{
-				MaxRankPosition:       30,
-				MinSearchVolume:       10,
-				MaxSearchVolume:       1000,
-				DifficultyFloor:       0,
-				DifficultyMaxAbsolute: 15,
-			}
-			if filters != want {
-				t.Errorf("early_footholds filters = %+v, want %+v", filters, want)
-			}
-
-			scoring := si.ScoringForStrategy("early_footholds")
-			if scoring.VolumeLogAnchor != 10000.0 || scoring.WeightVolume != 0.25 ||
-				scoring.WeightDifficulty != 0.55 || scoring.WeightFunnel != 0.20 {
-				t.Errorf("early_footholds scoring knobs = anchor %v, weights %v/%v/%v; want 10000/0.25/0.55/0.20",
-					scoring.VolumeLogAnchor, scoring.WeightVolume, scoring.WeightDifficulty, scoring.WeightFunnel)
-			}
-			// The unlisted knobs must keep tracking the base scoring block.
-			if scoring.OpportunityScale != si.Scoring.OpportunityScale ||
-				scoring.OpportunityGamma != si.Scoring.OpportunityGamma {
-				t.Errorf("early_footholds must inherit unlisted scoring knobs: %+v", scoring)
-			}
-
-			// balanced_growth has no entry on purpose: the base blocks are its config.
-			if got := si.FiltersForStrategy("balanced_growth"); got != si.KeywordFilters {
-				t.Errorf("balanced_growth filters = %+v, want the base keywordFilters", got)
 			}
 		})
 	}

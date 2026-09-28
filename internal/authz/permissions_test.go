@@ -3,8 +3,8 @@ package authz
 import "testing"
 
 func TestIsKnownPermission(t *testing.T) {
-	if !IsKnownPermission("content.manage") {
-		t.Error("content.manage must be known")
+	if !IsKnownPermission("users.read") {
+		t.Error("users.read must be known")
 	}
 	if !IsKnownPermission(string(PermRolesWrite)) {
 		t.Error("roles.write must be known")
@@ -20,12 +20,12 @@ func TestIsKnownPermission(t *testing.T) {
 }
 
 func TestIsSuperuserTier(t *testing.T) {
-	for _, p := range []string{string(PermRolesWrite), string(PermUsersDelete), string(PermPlansWrite), string(PermCronManage), Wildcard} {
+	for _, p := range []string{string(PermRolesWrite), string(PermUsersDelete), string(PermMigrationsRun), string(PermCronManage), Wildcard} {
 		if !IsSuperuserTier(p) {
 			t.Errorf("%q must be superuser-tier", p)
 		}
 	}
-	for _, p := range []string{string(PermAdminAccess), string(PermContentManage), string(PermEntitlementsGrant), string(PermPlansRead)} {
+	for _, p := range []string{string(PermAdminAccess), string(PermRolesRead), string(PermUsersRead), string(PermRolesRead)} {
 		if IsSuperuserTier(p) {
 			t.Errorf("%q must NOT be superuser-tier", p)
 		}
@@ -36,7 +36,7 @@ func TestIsValidRolePermission(t *testing.T) {
 	if !IsValidRolePermission(Wildcard) {
 		t.Error(`"*" must be valid in a role permission list`)
 	}
-	if !IsValidRolePermission(string(PermContentManage)) {
+	if !IsValidRolePermission(string(PermRolesRead)) {
 		t.Error("a known permission must be valid in a role permission list")
 	}
 	if IsValidRolePermission("nope") {

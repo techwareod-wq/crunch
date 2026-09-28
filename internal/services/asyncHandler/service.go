@@ -145,7 +145,7 @@ func (h *AsyncHandler) processMessage(ctx context.Context, body []byte, receiptH
 	)
 
 	// Extend visibility for process types that run longer than the queue
-	// default (e.g. clustering). A failure here only risks an early redelivery,
+	// default (e.g. a long LLM call). A failure here only risks an early redelivery,
 	// which the idempotency gate above absorbs, so log and proceed.
 	if seconds, ok := h.visibilityOverrides[msg.ProcessType]; ok {
 		if err := h.queue.ExtendVisibility(ctx, receiptHandle, seconds); err != nil {

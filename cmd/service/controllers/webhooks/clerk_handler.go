@@ -41,8 +41,7 @@ func HandleClerkWebhook(w http.ResponseWriter, r *http.Request) {
 	appCtx := config.GetAppContext(r)
 
 	// Cap the request body before verification so a hostile payload can't
-	// balloon memory on this unauthenticated endpoint (mirrors the Paddle
-	// webhook handler).
+	// balloon memory on this unauthenticated endpoint.
 	r.Body = http.MaxBytesReader(w, r.Body, appCtx.Config.Values.Webhooks.MaxClerkBodyBytes)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -121,24 +120,10 @@ func HandleClerkWebhook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		userID, err := appCtx.InternalServices.UserService.DeleteUser(r.Context(), userData.ID)
-		if err != nil {
+		if _, err := appCtx.InternalServices.UserService.DeleteUser(r.Context(), userData.ID); err != nil {
 			log.Error("clerk webhook: failed to delete user", "error", err, "clerk_id", userData.ID)
 			http.Error(w, "internal error", http.StatusInternalServerError)
 			return
-		}
-
-		// Deactivation only revokes access — Paddle keeps billing until told to
-		// stop. Cancel immediately rather than at period end: the account is gone,
-		// so there is nothing left to bill for. Failing the request is deliberate;
-		// Clerk redelivers, and both steps are idempotent.
-		if !userID.IsZero() {
-			if err := appCtx.InternalServices.PaymentService.CancelSubscriptionImmediately(r.Context(), userID); err != nil {
-				log.Error("clerk webhook: failed to cancel subscription for deleted user",
-					"error", err, "clerk_id", userData.ID, "user_id", userID.Hex())
-				http.Error(w, "internal error", http.StatusInternalServerError)
-				return
-			}
 		}
 
 		log.Info("clerk webhook: user deleted", "clerk_id", userData.ID)

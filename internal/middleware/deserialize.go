@@ -108,9 +108,6 @@ func DeserializeJson[T any]() func(http.Handler) http.Handler {
 
 // DeserializeJsonOptional is DeserializeJson for routes whose body is
 // OPTIONAL: a missing/empty body decodes to T's zero value instead of a 400.
-// Exists for the payment routes that historically took no body and gained an
-// optional `app` field — deployed clients that still POST bodyless must keep
-// working (omitted app = indexly).
 func DeserializeJsonOptional[T any]() func(http.Handler) http.Handler {
 	return deserializeJSON[T](true)
 }

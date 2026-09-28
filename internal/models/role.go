@@ -3,6 +3,7 @@ package models
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -226,7 +227,7 @@ func roleSpecEqual(a, b *Role) bool {
 	return a.Rank == b.Rank &&
 		a.Description == b.Description &&
 		a.System == b.System &&
-		stringSlicesEqual(a.Permissions, b.Permissions)
+		slices.Equal(a.Permissions, b.Permissions)
 }
 
 // SuperuserSeedReport summarizes one SeedSuperusersByEmail run.

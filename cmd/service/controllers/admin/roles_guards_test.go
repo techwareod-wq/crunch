@@ -138,11 +138,11 @@ func wantStatus(t *testing.T, rec *httptest.ResponseRecorder, want int) {
 // --- HandleAdminSetUserRole (roles.go) --------------------------------------
 
 func TestHandleAdminSetUserRole_Guards(t *testing.T) {
-	// A custom catalog for the subset test: "lead" holds only content.manage,
-	// "ops" additionally holds trials.manage (so ops ⊄ lead).
+	// A custom catalog for the subset test: "lead" holds only roles.read,
+	// "ops" additionally holds users.read (so ops ⊄ lead).
 	customCatalog := append(authz.DefaultRoles(),
-		models.Role{Key: "lead", Rank: 25, Permissions: []string{string(authz.PermContentManage)}},
-		models.Role{Key: "ops", Rank: 20, Permissions: []string{string(authz.PermContentManage), string(authz.PermTrialsManage)}},
+		models.Role{Key: "lead", Rank: 25, Permissions: []string{string(authz.PermRolesRead)}},
+		models.Role{Key: "ops", Rank: 20, Permissions: []string{string(authz.PermRolesRead), string(authz.PermUsersRead)}},
 	)
 
 	cases := []struct {
@@ -193,7 +193,7 @@ func TestHandleAdminSetUserRole_Guards(t *testing.T) {
 
 func TestHandleAdminUpsertRole_Guards(t *testing.T) {
 	leadCatalog := append(authz.DefaultRoles(),
-		models.Role{Key: "lead", Rank: 25, Permissions: []string{string(authz.PermContentManage)}},
+		models.Role{Key: "lead", Rank: 25, Permissions: []string{string(authz.PermRolesRead)}},
 	)
 
 	cases := []struct {
@@ -211,12 +211,12 @@ func TestHandleAdminUpsertRole_Guards(t *testing.T) {
 		},
 		{
 			name: "new rank >= caller rank", catalog: authz.DefaultRoles(), callerRole: models.RoleKeyAdmin,
-			req:      adminUpsertRoleRequest{Key: "newrole", Rank: 25, Permissions: []string{string(authz.PermContentManage)}},
+			req:      adminUpsertRoleRequest{Key: "newrole", Rank: 25, Permissions: []string{string(authz.PermRolesRead)}},
 			existing: nil, wantCode: apperrors.ErrRoleEscalation.Code,
 		},
 		{
 			name: "perms not subset of caller", catalog: leadCatalog, callerRole: "lead",
-			req:      adminUpsertRoleRequest{Key: "newrole", Rank: 10, Permissions: []string{string(authz.PermTrialsManage)}},
+			req:      adminUpsertRoleRequest{Key: "newrole", Rank: 10, Permissions: []string{string(authz.PermUsersRead)}},
 			existing: nil, wantCode: apperrors.ErrRoleEscalation.Code,
 		},
 		{

@@ -25,12 +25,6 @@ func (p pattern) WithJWTAuthentication() pattern {
 	return p
 }
 
-// WithJWTOrInviteAuthentication is kept for backwards compatibility — behaves
-// identically to WithJWTAuthentication now that Clerk handles all tokens.
-func (p pattern) WithJWTOrInviteAuthentication() pattern {
-	return p.WithJWTAuthentication()
-}
-
 func authenticateWithClerk() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -156,15 +150,6 @@ func resolveUserByClerkID(ctx context.Context, clerkID string) (*models.User, er
 		return existing, nil
 	}
 
-	// Signup hook (tenancy plan §3.1/D20): every user gets a personal company
-	// + claimed owner membership. Best-effort — the D20 index makes the racing
-	// webhook's call a no-op, and a failure here must not fail auth (the
-	// active-company middleware self-heals on the next request).
-	if newUser.Email != "" {
-		if _, err := models.EnsurePersonalCompany(ctx, newUser.ID, newUser.Email, newUser.Name); err != nil {
-			log.Warn("personal company mint failed on stub signup", "clerk_id", clerkID, "error", err)
-		}
-	}
 	return newUser, nil
 }
 

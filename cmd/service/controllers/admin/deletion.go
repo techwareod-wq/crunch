@@ -17,9 +17,6 @@ import (
 var (
 	findUserByIDIncludingDeactivated = models.FindUserByIDIncludingDeactivated
 
-	deleteWebEntityDataFn = func(r *http.Request, userID primitive.ObjectID, adminEmail string) (*accountService.DeletionReport, error) {
-		return config.GetAppContext(r).InternalServices.AccountService.DeleteWebEntityData(r.Context(), userID, adminEmail)
-	}
 	deleteUserAccountFn = func(r *http.Request, target *models.User, adminEmail string) (*accountService.DeletionReport, error) {
 		return config.GetAppContext(r).InternalServices.AccountService.DeleteUserAccount(r.Context(), target, adminEmail)
 	}
@@ -57,53 +54,15 @@ func resolveTargetUserIncludingDeactivated(r *http.Request, userId string) (*mod
 	return target, r.WithContext(ctx), nil
 }
 
-// --- SEO flow deletion: POST /v1/admin/web-entity/delete (users.delete) ---
-
-type adminDeleteWebEntityRequest struct {
-	UserID string `json:"userId"`
-}
-
-// HandleAdminDeleteWebEntity destroys the target's whole SEO flow (web entity
-// + every related doc + best-effort S3 images) and their billing docs (Paddle
-// cancel-now, then hard delete). The user account itself survives. No guards
-// beyond the users.delete permission: deleting anyone's SEO data is a
-// legitimate support op, and the typed-email confirm on the frontend is the
-// brake. Targets are resolved through the active filter — a tombstoned user's
-// leftovers are the delete-user cascade's job.
-func HandleAdminDeleteWebEntity(w http.ResponseWriter, r *http.Request) {
-	req, ok := r.Context().Value(middleware.DeserializerContextKey).(adminDeleteWebEntityRequest)
-	if !ok {
-		middleware.SendJSONError(w, r, apperrors.ErrInvalidRequestBody)
-		return
-	}
-
-	target, r, appErr := resolveTargetUser(r, req.UserID)
-	if appErr != nil {
-		middleware.SendJSONError(w, r, appErr)
-		return
-	}
-
-	adminUser := middleware.GetUserFromContext(r)
-	report, err := deleteWebEntityDataFn(r, target.ID, adminUser.Email)
-	if err != nil {
-		middleware.GetLogger(r).Error("web entity deletion failed", "error", err)
-		middleware.SendJSONError(w, r, apperrors.ErrAdminCheckFailed)
-		return
-	}
-
-	middleware.GetLogger(r).Info("admin deleted web entity data", "report", report)
-	middleware.SendJSONResponse(w, r, http.StatusOK, map[string]any{"report": report})
-}
-
 // --- account deletion: POST /v1/admin/users/delete (users.delete) ---
 
 type adminDeleteUserRequest struct {
 	UserID string `json:"userId"`
 }
 
-// HandleAdminDeleteUser destroys the target's account: the full SEO-flow
-// cascade, the paddle_customers mapping, the Clerk user, and finally the user
-// doc soft-deleted with PII scrubbed (transactions and adminActions survive).
+// HandleAdminDeleteUser destroys the target's account: every registered
+// feature's data (accountService.DataCleaner), the Clerk user, and finally the
+// user doc soft-deleted with PII scrubbed (adminActions survive).
 // Guards: no self-deletion, and no superuser targets — refusing every
 // superuser subsumes the last-superuser count and forces the demote path,
 // where the ErrLastSuperuser guard already lives.

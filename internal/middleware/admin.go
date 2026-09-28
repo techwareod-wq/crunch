@@ -92,7 +92,7 @@ func (p pattern) WithAdminAuthorization(required ...authz.Permission) pattern {
 // p under the SAME rules as the admin gate (DB-resolved permissions). Handlers
 // on shared multi-verb paths use it to enforce the write-tier permission the
 // path-level gate cannot: the route registry is path-only, so GET and POST on
-// /v1/admin/roles (or GET/POST/PUT on /v1/admin/plans) share ONE gate, which is
+// /v1/admin/roles share ONE gate, which is
 // tagged with the read permission — the handler then requires the write
 // permission for mutating methods. Returns false if the auth middleware didn't
 // run.

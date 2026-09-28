@@ -10,7 +10,7 @@ import (
 )
 
 // cronScheduler is set once in main after BuildCronScheduler (the
-// SetPlansCache/SetRolesCache precedent: the admin package can't ride on
+// SetRolesCache precedent: the admin package can't ride on
 // AppContext without a config→cron import cycle).
 var cronScheduler *cron.Scheduler
 

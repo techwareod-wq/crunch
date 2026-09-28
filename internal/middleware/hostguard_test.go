@@ -21,14 +21,14 @@ func TestHostGuard(t *testing.T) {
 		wantCode int
 	}{
 		{"disabled allows any host", nil, "1.2.3.4:3090", "/v1/users", http.StatusOK},
-		{"allowed domain passes", []string{"api.useindexly.com"}, "api.useindexly.com", "/v1/users", http.StatusOK},
-		{"allowed domain with port passes", []string{"api.useindexly.com"}, "api.useindexly.com:3090", "/v1/users", http.StatusOK},
-		{"case-insensitive match", []string{"api.useindexly.com"}, "API.UseIndexly.com", "/v1/users", http.StatusOK},
-		{"direct IP rejected", []string{"api.useindexly.com"}, "1.2.3.4:3090", "/v1/users", http.StatusForbidden},
-		{"other domain rejected", []string{"api.useindexly.com"}, "evil.example.com", "/v1/users", http.StatusForbidden},
-		{"loopback IP allowed (healthcheck)", []string{"api.useindexly.com"}, "127.0.0.1:3090", "/health", http.StatusOK},
-		{"loopback IP allowed on any path", []string{"api.useindexly.com"}, "127.0.0.1:3090", "/v1/users", http.StatusOK},
-		{"health path exempt regardless of host", []string{"api.useindexly.com"}, "10.0.0.5:3090", "/health", http.StatusOK},
+		{"allowed domain passes", []string{"api.example.com"}, "api.example.com", "/v1/users", http.StatusOK},
+		{"allowed domain with port passes", []string{"api.example.com"}, "api.example.com:3090", "/v1/users", http.StatusOK},
+		{"case-insensitive match", []string{"api.example.com"}, "API.Example.com", "/v1/users", http.StatusOK},
+		{"direct IP rejected", []string{"api.example.com"}, "1.2.3.4:3090", "/v1/users", http.StatusForbidden},
+		{"other domain rejected", []string{"api.example.com"}, "evil.example.com", "/v1/users", http.StatusForbidden},
+		{"loopback IP allowed (healthcheck)", []string{"api.example.com"}, "127.0.0.1:3090", "/health", http.StatusOK},
+		{"loopback IP allowed on any path", []string{"api.example.com"}, "127.0.0.1:3090", "/v1/users", http.StatusOK},
+		{"health path exempt regardless of host", []string{"api.example.com"}, "10.0.0.5:3090", "/health", http.StatusOK},
 	}
 
 	for _, tt := range tests {

@@ -11,14 +11,14 @@ import (
 // Host allowlist, configured once at boot via SetAllowedHosts. When empty the
 // guard is disabled and every Host is served — the default for local/dev and
 // any environment that does not pin a domain. Production pins
-// "api.useindexly.com" so requests sent straight to the server's IP (whose Host
+// "api.example.com" so requests sent straight to the server's IP (whose Host
 // header is the IP, not the domain) are rejected.
 var allowedHosts = map[string]struct{}{}
 
 // SetAllowedHosts locks the server to an explicit set of Host header values.
 // Call once at startup, before serving. An empty list disables the guard.
 // Entries are matched case-insensitively against the request Host with any
-// port stripped, e.g. "api.useindexly.com".
+// port stripped, e.g. "api.example.com".
 func SetAllowedHosts(hosts []string) {
 	allowedHosts = make(map[string]struct{}, len(hosts))
 	for _, h := range hosts {

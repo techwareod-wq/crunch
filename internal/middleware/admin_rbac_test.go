@@ -54,12 +54,12 @@ func TestAdminGate_BaselineAdminAccessPasses(t *testing.T) {
 
 func TestAdminGate_AdminHoldsDomainPermission(t *testing.T) {
 	withRolesCache(t, authz.DefaultRoles())
-	h := buildAdminRouteRBAC(t, "/test/rbac-content", authz.PermContentManage)
+	h := buildAdminRouteRBAC(t, "/test/rbac-users", authz.PermUsersRead)
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, requestWithRoleUser(models.RoleKeyAdmin, "admin@x.com"))
 	if rec.Code != http.StatusOK {
-		t.Fatalf("admin on content.manage route: status = %d, want 200", rec.Code)
+		t.Fatalf("admin on users.read route: status = %d, want 200", rec.Code)
 	}
 }
 
@@ -80,7 +80,7 @@ func TestAdminGate_MissingRequiredPermIsForbiddenAndAudited(t *testing.T) {
 
 func TestAdminGate_SuperuserPassesEverything(t *testing.T) {
 	withRolesCache(t, authz.DefaultRoles())
-	h := buildAdminRouteRBAC(t, "/test/rbac-super-ok", authz.PermPlansWrite, authz.PermUsersDelete)
+	h := buildAdminRouteRBAC(t, "/test/rbac-super-ok", authz.PermMigrationsRun, authz.PermUsersDelete)
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, requestWithRoleUser(models.RoleKeySuperuser, "root@x.com"))

@@ -14,7 +14,7 @@ import (
 	"github.com/atharva-ng/crunch/internal/services/accountService"
 )
 
-// Handler-level guards for the two deletion endpoints. Every DB/service touch
+// Handler-level guards for the delete-user endpoint. Every DB/service touch
 // goes through the package-var seams in deletion.go / target.go, so these run
 // in-memory with no Mongo.
 
@@ -34,13 +34,6 @@ func withFindUserIncludingDeactivatedSeam(t *testing.T, fn func(ctx context.Cont
 	t.Cleanup(func() { findUserByIDIncludingDeactivated = orig })
 }
 
-func withDeleteWebEntitySeam(t *testing.T, fn func(r *http.Request, userID primitive.ObjectID, adminEmail string) (*accountService.DeletionReport, error)) {
-	t.Helper()
-	orig := deleteWebEntityDataFn
-	deleteWebEntityDataFn = fn
-	t.Cleanup(func() { deleteWebEntityDataFn = orig })
-}
-
 func withDeleteUserAccountSeam(t *testing.T, fn func(r *http.Request, target *models.User, adminEmail string) (*accountService.DeletionReport, error)) {
 	t.Helper()
 	orig := deleteUserAccountFn
@@ -48,13 +41,9 @@ func withDeleteUserAccountSeam(t *testing.T, fn func(r *http.Request, target *mo
 	t.Cleanup(func() { deleteUserAccountFn = orig })
 }
 
-// deleteNeverCalled fails the test if either deletion service seam fires.
+// deleteNeverCalled fails the test if the deletion service seam fires.
 func deleteNeverCalled(t *testing.T) {
 	t.Helper()
-	withDeleteWebEntitySeam(t, func(r *http.Request, userID primitive.ObjectID, adminEmail string) (*accountService.DeletionReport, error) {
-		t.Error("DeleteWebEntityData must not be called")
-		return nil, nil
-	})
 	withDeleteUserAccountSeam(t, func(r *http.Request, target *models.User, adminEmail string) (*accountService.DeletionReport, error) {
 		t.Error("DeleteUserAccount must not be called")
 		return nil, nil
@@ -159,47 +148,5 @@ func TestDeleteUser_ServiceErrorIs500(t *testing.T) {
 		adminDeleteUserRequest{UserID: target.ID.Hex()}))
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", rec.Code)
-	}
-}
-
-// --- delete web entity guards ------------------------------------------------
-
-// The web-entity endpoint uses the ACTIVE-only resolver: a tombstoned target
-// is a 404 here (their leftovers belong to the delete-user cascade).
-func TestDeleteWebEntity_DeactivatedTargetIs404(t *testing.T) {
-	deleteNeverCalled(t)
-	withFindUserByIDSeam(t, func(ctx context.Context, id string) (bool, *models.User, error) {
-		return false, nil, nil // active filter hides tombstones
-	})
-
-	rec := serveDeletion(HandleAdminDeleteWebEntity, deserReq(callerUser(models.RoleKeySuperuser),
-		adminDeleteWebEntityRequest{UserID: primitive.NewObjectID().Hex()}))
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", rec.Code)
-	}
-}
-
-func TestDeleteWebEntity_HappyPathPassesAdminEmail(t *testing.T) {
-	target := &models.User{ID: primitive.NewObjectID(), Email: "user@x.com", Role: models.RoleKeyUser}
-	withFindUserByIDSeam(t, func(ctx context.Context, id string) (bool, *models.User, error) {
-		return true, target, nil
-	})
-
-	caller := callerUser(models.RoleKeySuperuser)
-	called := false
-	withDeleteWebEntitySeam(t, func(r *http.Request, userID primitive.ObjectID, adminEmail string) (*accountService.DeletionReport, error) {
-		called = true
-		if userID != target.ID {
-			t.Errorf("service got user %s, want %s", userID.Hex(), target.ID.Hex())
-		}
-		if adminEmail != caller.Email {
-			t.Errorf("admin email = %q, want %q", adminEmail, caller.Email)
-		}
-		return &accountService.DeletionReport{WebEntitiesDeleted: 1}, nil
-	})
-
-	rec := serveDeletion(HandleAdminDeleteWebEntity, deserReq(caller, adminDeleteWebEntityRequest{UserID: target.ID.Hex()}))
-	if rec.Code != http.StatusOK || !called {
-		t.Errorf("status = %d (called=%v), want 200 with service called", rec.Code, called)
 	}
 }

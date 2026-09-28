@@ -28,33 +28,3 @@ func TestExtractDomain(t *testing.T) {
 		})
 	}
 }
-
-func TestNormalizeGSCPageURL(t *testing.T) {
-	cases := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{"plain page", "https://abc.com/blog/post", "https://abc.com/blog/post"},
-		{"trailing slash stripped", "https://abc.com/blog/post/", "https://abc.com/blog/post"},
-		{"root slash kept", "https://abc.com/", "https://abc.com/"},
-		{"bare host gains root slash", "https://abc.com", "https://abc.com/"},
-		{"query stripped", "https://abc.com/x?utm=1", "https://abc.com/x"},
-		{"fragment stripped", "https://abc.com/x#section", "https://abc.com/x"},
-		{"scheme and host lowercased", "HTTPS://ABC.com/Blog", "https://abc.com/Blog"},
-		{"www collapsed (one fact identity per page)", "https://www.abc.com/x", "https://abc.com/x"},
-		{"real subdomain kept", "https://clerk.abc.com/x", "https://clerk.abc.com/x"},
-		{"http collapses to https (one fact identity per page)", "http://abc.com/x", "https://abc.com/x"},
-		{"scheme-less treated as https", "abc.com/blog", "https://abc.com/blog"},
-		{"whitespace", "  https://abc.com/x  ", "https://abc.com/x"},
-		{"non-http scheme rejected", "ftp://abc.com/x", ""},
-		{"empty", "", ""},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			if got := NormalizeGSCPageURL(c.in); got != c.want {
-				t.Errorf("NormalizeGSCPageURL(%q) = %q, want %q", c.in, got, c.want)
-			}
-		})
-	}
-}

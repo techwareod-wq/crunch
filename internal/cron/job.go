@@ -23,7 +23,7 @@ type JobName string
 // Job is one scheduled trigger. A feature owns its Resolve; the framework owns
 // time, exactly-once, fan-out and observability.
 type Job struct {
-	Name    JobName              // "seo_daily_generation" — the claim key
+	Name    JobName              // "demo_heartbeat" — the claim key
 	Spec    Spec                 // when (spec.go)
 	Resolve Resolver             // who is due
 	Process pipeline.ProcessType // what gets enqueued per unit

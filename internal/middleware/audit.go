@@ -93,7 +93,7 @@ func shouldPersistDenial(email string) bool {
 }
 
 // auditBodyCapture tees the raw request body into a capped buffer for the few
-// admin routes that decode their own JSON (web-entity PATCH, plans upsert) —
+// admin routes that decode their own JSON —
 // for every other route the deserialized value is already in the context and
 // no capture is needed.
 type auditBodyCapture struct {

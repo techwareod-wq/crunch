@@ -3,7 +3,6 @@ package admin
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -44,8 +43,8 @@ func TestHandleAdminSeedRoles_DryRunDefaultAndApplyReload(t *testing.T) {
 	var gotDryRun bool
 	seedRolesCatalog = func(ctx context.Context, incoming []models.Role, dryRun bool) (*models.RoleSeedReport, error) {
 		gotDryRun = dryRun
-		if len(incoming) < 5 {
-			t.Errorf("seed catalog has %d roles, want the full 5 (3 system + 2 company)", len(incoming))
+		if len(incoming) < 3 {
+			t.Errorf("seed catalog has %d roles, want the full 3 system roles", len(incoming))
 		}
 		return &models.RoleSeedReport{Created: 2, Unchanged: 3}, nil
 	}
@@ -71,59 +70,5 @@ func TestHandleAdminSeedRoles_DryRunDefaultAndApplyReload(t *testing.T) {
 	}
 	if !reloaded {
 		t.Fatal("apply with writes did not reload the roles cache")
-	}
-}
-
-func TestHandleAdminCompanyMigrate_ActionDispatch(t *testing.T) {
-	origMigrate, origVerify, origDrop, origEnsure := migrateCompanyTenancy, verifyCompanyTenancy, dropWebEntityUserIndex, ensureTenancyIndexes
-	defer func() {
-		migrateCompanyTenancy, verifyCompanyTenancy, dropWebEntityUserIndex, ensureTenancyIndexes = origMigrate, origVerify, origDrop, origEnsure
-	}()
-
-	var migrateDry *bool
-	ensured := false
-	migrateCompanyTenancy = func(ctx context.Context, dryRun bool) (*models.CompanyMigrationReport, error) {
-		migrateDry = &dryRun
-		return &models.CompanyMigrationReport{Users: 4, PersonalCreated: 1, WebEntitiesUnresolvable: []string{"we1"}}, nil
-	}
-	verifyCompanyTenancy = func(ctx context.Context) (*models.CompanyTenancyVerifyReport, error) {
-		return &models.CompanyTenancyVerifyReport{LegacyUserIndexPresent: true}, nil
-	}
-	dropWebEntityUserIndex = func(ctx context.Context, dryRun bool) (bool, error) {
-		return false, errors.New("refusing to drop: 3 webEntity docs still have no company_id")
-	}
-	ensureTenancyIndexes = func(ctx context.Context) error { ensured = true; return nil }
-
-	// Bodyless default = migrate, dry run, indexes untouched.
-	w := runMigrationHandler(t, HandleAdminCompanyMigrate, nil)
-	if w.Code != http.StatusOK || migrateDry == nil || !*migrateDry || ensured {
-		t.Fatalf("default action: code=%d dry=%v ensured=%v", w.Code, migrateDry, ensured)
-	}
-	if data := decodeData(t, w); data["action"] != "migrate" || len(data["webEntitiesUnresolvable"].([]any)) != 1 {
-		t.Fatalf("migrate response = %v (anomalies must ride the response)", data)
-	}
-
-	// Apply ensures indexes first.
-	w = runMigrationHandler(t, HandleAdminCompanyMigrate, adminCompanyMigrateRequest{Action: "migrate", Apply: true})
-	if w.Code != http.StatusOK || *migrateDry || !ensured {
-		t.Fatalf("apply migrate: code=%d dry=%v ensured=%v", w.Code, *migrateDry, ensured)
-	}
-
-	// Verify is read-only reporting.
-	w = runMigrationHandler(t, HandleAdminCompanyMigrate, adminCompanyMigrateRequest{Action: "verify"})
-	if data := decodeData(t, w); w.Code != http.StatusOK || data["allInvariantsHold"] != true || data["legacyUserIndexPresent"] != true {
-		t.Fatalf("verify: code=%d data=%v", w.Code, data)
-	}
-
-	// The drop refusal surfaces as a 409 with the reason, not a generic 500.
-	w = runMigrationHandler(t, HandleAdminCompanyMigrate, adminCompanyMigrateRequest{Action: "drop-user-index"})
-	if w.Code != http.StatusConflict {
-		t.Fatalf("drop refusal: code=%d, want 409", w.Code)
-	}
-
-	// Unknown action → 400.
-	w = runMigrationHandler(t, HandleAdminCompanyMigrate, adminCompanyMigrateRequest{Action: "bogus"})
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("bogus action: code=%d, want 400", w.Code)
 	}
 }

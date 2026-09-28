@@ -18,27 +18,13 @@ import (
 //     Scale-tier Anthropic rate limits); integration stays small.
 //   - async.workerCount    — prod runs a larger general async worker pool;
 //     integration stays small.
-//   - apis.sidecar.baseURL — prod uses the compose-internal service name.
-//   - company.inviteUrlTemplate — a frontend URL by nature (integration
-//     points at the local `next dev`; prod at the app domain). The TTL knob
-//     is NOT exempt and stays in lockstep.
-//   - company.enabled — the company-surface master switch, same lifecycle as
-//     the cron flags: live in integration first, dark in prod until proven.
-//   - gsc.enabled — the GSC analytics-surface master switch, same lifecycle
-//     as company.enabled. The top-N fetch caps are NOT exempt and stay in
-//     lockstep.
-//   - audit.enabled — the audit-surface master switch, same lifecycle as
-//     gsc.enabled (live in integration first, dark in prod until launch).
-//     Every other audit knob (caps, sampling, gating, models) is NOT exempt
-//     and stays in lockstep.
 //   - cron.jobs.*.enabled — the per-beat kill switch, and the whole point of
 //     integration: a beat goes live there first and stays dark in prod until it
 //     has proven itself. Only the flag is exempt — the job KEY SET and every
 //     schedule knob (at/zone/weekdays/everySeconds/maxUnits)
 //     are still compared, so a time tuned in one file only still fails.
 //
-// (See docs/IMPLEMENTATION_PLAN.md C39. If a genuinely per-env key is added,
-// neutralise it below and document why.)
+// (If a genuinely per-env key is added, neutralise it below and document why.)
 
 // TestValues_EnvFilesDriftGuard asserts the two environment values files are
 // identical once the intentional per-env keys are neutralised. Keeping them in
@@ -66,11 +52,6 @@ func TestValues_EnvFilesDriftGuard(t *testing.T) {
 		v.Async.TokenLimit = 0
 		v.Async.LLMWorkerCount = 0
 		v.Async.WorkerCount = 0
-		v.APIs.Sidecar.BaseURL = ""
-		v.Company.InviteURLTemplate = ""
-		v.Company.Enabled = false
-		v.GSC.Enabled = false
-		v.Audit.Enabled = false
 		// Blank each cron job's on/off flag but keep the entry, so a job
 		// present in one file and missing from the other is still a drift.
 		for name, job := range v.Cron.Jobs {

@@ -15,7 +15,7 @@ func TestValidateGrantEntries(t *testing.T) {
 		entries []adminPermissionEntryDTO
 		want    *apperrors.Error
 	}{
-		{"known non-tier ok", []adminPermissionEntryDTO{entry(string(authz.PermContentManage)), entry(string(authz.PermUsersRead))}, nil},
+		{"known non-tier ok", []adminPermissionEntryDTO{entry(string(authz.PermRolesRead)), entry(string(authz.PermUsersRead))}, nil},
 		{"unknown key 400", []adminPermissionEntryDTO{entry("bogus.key")}, apperrors.ErrUnknownPermissionKey},
 		{"wildcard rejected 400", []adminPermissionEntryDTO{entry(authz.Wildcard)}, apperrors.ErrUnknownPermissionKey},
 		{"superuser-tier forbidden 403", []adminPermissionEntryDTO{entry(string(authz.PermRolesWrite))}, apperrors.ErrRoleEscalation},
@@ -37,7 +37,7 @@ func TestValidateRevokeEntries(t *testing.T) {
 		entries []adminPermissionEntryDTO
 		want    *apperrors.Error
 	}{
-		{"known non-tier ok", []adminPermissionEntryDTO{entry(string(authz.PermTrialsManage))}, nil},
+		{"known non-tier ok", []adminPermissionEntryDTO{entry(string(authz.PermUsersRead))}, nil},
 		// admin.access is forbidden in revokes too (S1) — symmetric with grants:
 		// revoking the universal baseline API-locks the target out of the whole
 		// panel while they still count as an active superuser (an availability

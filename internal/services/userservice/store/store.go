@@ -5,7 +5,6 @@ import (
 
 	"github.com/atharva-ng/crunch/internal/models"
 	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // Store defines the data-access methods for users.
@@ -21,7 +20,6 @@ type Store interface {
 	CreateUser(ctx context.Context, user *models.User) error
 	UpdateUserByClerkID(ctx context.Context, clerkID string, update bson.M) error
 	DeactivateUserByClerkID(ctx context.Context, clerkID string) error
-	EnsurePersonalCompany(ctx context.Context, userID primitive.ObjectID, email, name string) (*models.Company, error)
 }
 
 type store struct{}
@@ -56,8 +54,4 @@ func (s *store) UpdateUserByClerkID(ctx context.Context, clerkID string, update 
 
 func (s *store) DeactivateUserByClerkID(ctx context.Context, clerkID string) error {
 	return models.DeactivateUserByClerkID(ctx, clerkID)
-}
-
-func (s *store) EnsurePersonalCompany(ctx context.Context, userID primitive.ObjectID, email, name string) (*models.Company, error) {
-	return models.EnsurePersonalCompany(ctx, userID, email, name)
 }

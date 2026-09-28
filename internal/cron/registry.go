@@ -5,32 +5,16 @@ import (
 	"time"
 
 	"github.com/atharva-ng/crunch/internal/config"
-	"github.com/atharva-ng/crunch/internal/entitlements"
 	"github.com/atharva-ng/crunch/internal/util/log"
 )
 
-// ServiceLocator carries what resolvers need beyond the models layer. Mirrors
-// asyncHandler.ServiceLocator: registration stays one wiring site.
-type ServiceLocator struct {
-	// PlansCache backs entitlement checks in resolvers (a trial_expired
-	// view-only user must not receive nudges or burn generation tokens).
-	PlansCache *entitlements.PlansCache
-	// DefaultZone is the IANA fallback for users with no stored timezone
-	// (values cron.defaultZone).
-	DefaultZone string
-}
-
-// BuildJobRegistry assembles every registered job from its code definition +
-// values overrides. Schedule DEFINITIONS live in code; their times and on/off
+// BuildJobRegistry assembles every registered job (defs, contributed by the
+// feature modules) from its code definition + values overrides. Schedule DEFINITIONS live in code; their times and on/off
 // flags live in values (cron.jobs.<name>), so a misbehaving beat dies with a
 // values change and a restart — no code, no migration.
 //
 // A job with no values entry, or enabled: false, is dark — logged and skipped.
-func BuildJobRegistry(l *ServiceLocator, v config.CronValues) ([]Job, error) {
-	defs := []Job{}
-	defs = append(defs, seoSchedulingJobs(l, v)...)
-	defs = append(defs, analyticsJobs(l, v)...)
-
+func BuildJobRegistry(defs []Job, v config.CronValues) ([]Job, error) {
 	jobs := make([]Job, 0, len(defs))
 	for _, def := range defs {
 		jv, ok := v.Jobs[string(def.Name)]

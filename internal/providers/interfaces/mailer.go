@@ -2,11 +2,10 @@ package interfaces
 
 import "context"
 
-// Mailer sends transactional email (the company invite-accept links —
-// tenancy plan D3/D19). Implementations must be safe for concurrent use. A
-// deployment with no mail transport wires the disabled impl, which returns
-// ErrMailerDisabled — callers treat sending as best-effort and surface the
-// link through the API response instead.
+// Mailer sends transactional email. Implementations must be safe for
+// concurrent use. A deployment with no mail transport (empty SMTP_HOST) still
+// gets a Mailer whose Enabled() is false — callers treat sending as
+// best-effort.
 type Mailer interface {
 	// Send delivers one plain-text email.
 	Send(ctx context.Context, to, subject, body string) error

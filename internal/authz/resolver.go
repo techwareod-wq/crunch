@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/atharva-ng/crunch/internal/models"
-	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 // EffectivePermissions computes the caller's live permission set:
@@ -27,11 +26,7 @@ func EffectivePermissions(u *models.User, roles *RolesCache, now time.Time) map[
 		return set
 	}
 
-	// A company role key as a global user.Role resolves NOTHING (D17): the
-	// assign endpoint rejects them, and this guard makes a hand-edited doc
-	// structurally inert too. (Even without it, company keys fail
-	// IsKnownPermission below — this is belt and suspenders.)
-	if role, ok := roles.ByKey(u.Role); ok && !IsCompanyRoleKey(u.Role) {
+	if role, ok := roles.ByKey(u.Role); ok {
 		for _, p := range role.Permissions {
 			if p == Wildcard {
 				for _, all := range AllPermissions {
@@ -148,60 +143,4 @@ func IsSubset(sub, super map[Permission]bool) bool {
 		}
 	}
 	return true
-}
-
-// EffectiveCompanyPermissions computes a member's live COMPANY permission set
-// from their membership's role (tenancy plan §5.3). The company axis is fully
-// separate from the global resolver (D17): no extra-grants, no wildcard, no
-// platform-admin bypass — cross-tenant access is a hard no.
-//
-// Fails closed INSIDE the resolver unless the membership is claimed:
-// archived/invited memberships yield the empty set regardless of what a call
-// site forgot to check (D13). A membership pointing at a non-company role key
-// also resolves nothing.
-func EffectiveCompanyPermissions(m *models.CompanyMembership, roles *RolesCache) map[Permission]bool {
-	set := map[Permission]bool{}
-	if m == nil || m.Status != models.CompanyMembershipStatusClaimed {
-		return set
-	}
-	if !IsCompanyRoleKey(m.Role) {
-		return set
-	}
-	role, ok := roles.ByKey(m.Role)
-	if !ok {
-		return set
-	}
-	for _, p := range role.Permissions {
-		if IsKnownCompanyPermission(p) {
-			set[Permission(p)] = true
-		}
-	}
-	return set
-}
-
-// AllCompanyPermissionSet is the full company-axis grant — what the owner
-// rule confers.
-func AllCompanyPermissionSet() map[Permission]bool {
-	set := make(map[Permission]bool, len(AllCompanyPermissions))
-	for _, p := range AllCompanyPermissions {
-		set[p] = true
-	}
-	return set
-}
-
-// ResolveCompanyPermissions is the request-time company resolver: the owner
-// rule (D12/D21 — OwnerUserID match ⇒ user_admin perms unconditionally, no
-// catalog dependency) layered over EffectiveCompanyPermissions. userID is the
-// caller; company may be nil (resolves via membership only).
-func ResolveCompanyPermissions(userID primitive.ObjectID, company *models.Company, m *models.CompanyMembership, roles *RolesCache) map[Permission]bool {
-	if company != nil && !userID.IsZero() && company.OwnerUserID == userID {
-		return AllCompanyPermissionSet()
-	}
-	return EffectiveCompanyPermissions(m, roles)
-}
-
-// CompanyHas reports whether the resolved company permission set holds p —
-// the ONLY way company routes gate (never the global Has, D17).
-func CompanyHas(perms map[Permission]bool, p Permission) bool {
-	return perms[p]
 }

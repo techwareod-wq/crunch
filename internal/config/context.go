@@ -5,20 +5,10 @@ import (
 	"net/http"
 
 	"github.com/atharva-ng/crunch/internal/authz"
-	"github.com/atharva-ng/crunch/internal/entitlements"
 	"github.com/atharva-ng/crunch/internal/providers/interfaces"
 	"github.com/atharva-ng/crunch/internal/tokentracker"
 
-	"github.com/atharva-ng/crunch/internal/audit"
 	"github.com/atharva-ng/crunch/internal/services/accountService"
-	"github.com/atharva-ng/crunch/internal/services/contentBridge"
-	"github.com/atharva-ng/crunch/internal/services/contentGenerationEngine"
-	"github.com/atharva-ng/crunch/internal/services/onboardingService"
-	"github.com/atharva-ng/crunch/internal/services/paymentService"
-	"github.com/atharva-ng/crunch/internal/services/scheduledArticleService"
-	"github.com/atharva-ng/crunch/internal/services/schedulingEngine"
-	"github.com/atharva-ng/crunch/internal/services/siteIntelligenceEngine"
-	"github.com/atharva-ng/crunch/internal/services/styleReplicationService"
 	"github.com/atharva-ng/crunch/internal/services/userservice"
 )
 
@@ -37,32 +27,50 @@ type LLMProvider struct {
 	DefaultMaxTokens int
 }
 
+// Default returns the provider named by name ("anthropic" | "openai" |
+// "gemini" — LLMConfig.DefaultProvider), falling back to the first configured
+// provider when that one has no API key. Nil when no provider is configured.
+func (p *LLMProvider) Default(name string) interfaces.LlmService {
+	if p == nil {
+		return nil
+	}
+	named := map[string]interfaces.LlmService{
+		"anthropic": p.Anthropic,
+		"openai":    p.OpenAI,
+		"gemini":    p.Gemini,
+	}
+	if svc := named[name]; svc != nil {
+		return svc
+	}
+	for _, svc := range []interfaces.LlmService{p.Anthropic, p.OpenAI, p.Gemini} {
+		if svc != nil {
+			return svc
+		}
+	}
+	return nil
+}
+
 type InternalServices struct {
-	UserService              userservice.UserService
-	OnboardingService        onboardingService.OnboardingService
-	SiteIntelligenceService  siteIntelligenceEngine.SiteIntelligenceService
-	ContentGenerationService contentGenerationEngine.ContentGenerationService
-	SchedulingService        schedulingEngine.SchedulingService
-	ScheduledArticleService  scheduledArticleService.ScheduledArticleService
-	PaymentService           paymentService.PaymentService
-	AccountService           accountService.AccountService
-	ContentBridgeService     contentBridge.ContentBridgeService
-	StyleReplicationService  styleReplicationService.StyleReplicationService
-	AuditService             audit.AuditService
-	LLM                      *LLMProvider
-	Dispatcher               interfaces.Dispatcher
+	UserService    userservice.UserService
+	AccountService accountService.AccountService
+	LLM            *LLMProvider
+	// ImageGen is the configured image-generation provider
+	// (values.apis.imageGen.defaultProvider); nil when its API key is unset.
+	ImageGen interfaces.ImageGenerator
+	// Mailer sends transactional email; Enabled() is false with no SMTP_HOST.
+	Mailer     interfaces.Mailer
+	Dispatcher interfaces.Dispatcher
 }
 
 type AppContext struct {
-	Config                 AppConfig
-	S3Provider             interfaces.S3
-	PaddleProvider         interfaces.PaddleClient
-	GSCProvider            interfaces.GSC
+	Config     AppConfig
+	S3Provider interfaces.S3
+	// APIClient is the shared outbound HTTP client (values.apis.httpClient).
+	APIClient              interfaces.ApiClient
 	QueueProvider          interfaces.Queue
 	SecondaryQueueProvider interfaces.Queue
 	IdempotencyStore       interfaces.IdempotencyStore
 	TokenTracker           *tokentracker.Tracker
-	PlansCache             *entitlements.PlansCache
 	RolesCache             *authz.RolesCache
 	InternalServices       InternalServices
 }

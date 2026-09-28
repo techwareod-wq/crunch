@@ -9,29 +9,21 @@ import (
 	"time"
 
 	"github.com/atharva-ng/crunch/cmd/service/controllers/admin"
-	analyticsctl "github.com/atharva-ng/crunch/cmd/service/controllers/analytics"
-	auditctl "github.com/atharva-ng/crunch/cmd/service/controllers/audit"
-	"github.com/atharva-ng/crunch/cmd/service/controllers/company"
-	"github.com/atharva-ng/crunch/cmd/service/controllers/contentbridge"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/healthcheck"
-	"github.com/atharva-ng/crunch/cmd/service/controllers/onboarding"
-	"github.com/atharva-ng/crunch/cmd/service/controllers/payments"
-	"github.com/atharva-ng/crunch/cmd/service/controllers/scheduledarticles"
-	"github.com/atharva-ng/crunch/cmd/service/controllers/seoblog"
-	"github.com/atharva-ng/crunch/cmd/service/controllers/siteintelligence"
-	"github.com/atharva-ng/crunch/cmd/service/controllers/stylereplication"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/users"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/webhooks"
 	"github.com/atharva-ng/crunch/cmd/service/providers"
 	"github.com/atharva-ng/crunch/internal/config"
 	"github.com/atharva-ng/crunch/internal/middleware"
+	"github.com/atharva-ng/crunch/internal/modules"
 	"github.com/atharva-ng/crunch/internal/util/log"
 )
 
 func main() {
 	appCtx := &config.AppContext{}
+	mods := enabledModules(appCtx)
 
-	err := ProvideAppContext(appCtx)
+	err := ProvideAppContext(appCtx, mods)
 	if err != nil {
 		log.Error("failed to add app context", "error", err)
 		os.Exit(1)
@@ -40,51 +32,27 @@ func main() {
 	// Lock CORS to the configured origins before any route is assembled.
 	middleware.SetAllowedOrigins(appCtx.Config.Server.AllowedOrigins)
 
-	// Pin the accepted Host headers (production: api.useindexly.com) so requests
+	// Pin the accepted Host headers (production: the public API host) so requests
 	// sent directly to the server's IP are rejected. Empty list = unrestricted.
 	middleware.SetAllowedHosts(appCtx.Config.Server.AllowedHosts)
 
-	// Plan catalog for the entitlement middlewares (boot-loaded by the
-	// providers).
-	middleware.SetPlansCache(appCtx.PlansCache)
-
 	// Role catalog for the admin authorization gate (boot-loaded by the
-	// providers; mirrors SetPlansCache).
+	// providers).
 	middleware.SetRolesCache(appCtx.RolesCache)
 
-	// Company-surface master switch (values.yaml company.enabled): OFF answers
-	// every /v1/company/* route with a JSON 404 masquerade, CORS intact. The
-	// data layer underneath keeps running — see CompanyValues.Enabled.
-	middleware.SetCompanyFeatureEnabled(appCtx.Config.Values.Company.Enabled)
-
-	// Analytics-surface master switch (values.yaml gsc.enabled): OFF answers
-	// every /v1/analytics/* route with a JSON 404 masquerade, CORS intact. The
-	// ingest layer is gated separately by the cron.jobs.analytics_* flags.
-	middleware.SetAnalyticsFeatureEnabled(appCtx.Config.Values.GSC.Enabled)
-
-	// Style-replication-surface master switch (values.yaml
-	// styleReplication.enabled): OFF answers every /v1/style-replication/*
-	// route with a JSON 404 masquerade, CORS intact.
-	middleware.SetStyleReplicationFeatureEnabled(appCtx.Config.Values.StyleReplication.Enabled)
-
-	// Audit-surface master switch (values.yaml audit.enabled): OFF answers
-	// every /v1/audit/* route — tenant AND public lead routes — with a 404
-	// masquerade, CORS intact.
-	middleware.SetAuditFeatureEnabled(appCtx.Config.Values.Audit.Enabled)
-
-	loadAppAPIs(appCtx)
+	loadAppAPIs(appCtx, mods)
 
 	middleware.RegisterAll(nil)
 
 	// Build async handlers after all services are wired.
-	primaryHandler := providers.BuildAsyncHandler(appCtx)
-	secondaryHandler := providers.BuildSecondaryAsyncHandler(appCtx)
+	primaryHandler := providers.BuildAsyncHandler(appCtx, mods)
+	secondaryHandler := providers.BuildSecondaryAsyncHandler(appCtx, mods)
 
 	// Cron scheduler: resolves who is due per registered job and enqueues onto
 	// the same queues the handlers above consume. Built after the services
 	// (resolvers use them); a misconfigured job set is fatal at boot, not
-	// silently at 08:30.
-	cronScheduler, err := providers.BuildCronScheduler(appCtx)
+	// silently at the first scheduled tick.
+	cronScheduler, err := providers.BuildCronScheduler(appCtx, mods)
 	if err != nil {
 		log.Error("failed to build cron scheduler", "error", err)
 		os.Exit(1)
@@ -98,13 +66,9 @@ func main() {
 	appCtx.TokenTracker.Start()
 	defer appCtx.TokenTracker.Stop()
 
-	// Periodic plan-catalog refresh: bounds staleness for processes that
-	// didn't serve an admin plan write (rolling deploys run two).
+	// Periodic role-catalog refresh: bounds staleness for a process that
+	// didn't serve an admin role write (rolling deploys run two).
 	cacheRefresh := time.Duration(appCtx.Config.Values.Admin.CacheRefreshSeconds) * time.Second
-	appCtx.PlansCache.StartRefresh(ctx, cacheRefresh)
-
-	// Periodic role-catalog refresh: same rationale as the plans cache — bounds
-	// staleness for a process that didn't serve an admin role write.
 	appCtx.RolesCache.StartRefresh(ctx, cacheRefresh)
 
 	// Start primary async handler in background.
@@ -142,19 +106,10 @@ func main() {
 	}
 }
 
-func loadAppAPIs(appCtx *config.AppContext) {
+func loadAppAPIs(appCtx *config.AppContext, mods []modules.Module) {
 	healthcheck.Handle()
 	users.Handle(appCtx)
 	webhooks.Handle(appCtx)
-	onboarding.Handle(appCtx)
-	siteintelligence.Handle(appCtx)
-	seoblog.Handle(appCtx)
-	scheduledarticles.Handle(appCtx)
-	payments.Handle(appCtx)
-	contentbridge.Handle(appCtx)
-	company.Handle(appCtx)
-	analyticsctl.Handle(appCtx)
-	stylereplication.Handle(appCtx)
-	auditctl.Handle(appCtx)
 	admin.Handle(appCtx)
+	modules.RegisterRoutes(appCtx, mods)
 }

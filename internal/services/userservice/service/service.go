@@ -71,10 +71,6 @@ func (svc *service) SyncUser(ctx context.Context, req dto.SyncUserRequest) error
 		}); err != nil {
 			return err
 		}
-		// A JWT-stub user may have been minted before their email was known —
-		// the personal-company hook re-runs here (idempotent via the D20
-		// index) so every emailed user ends up with one.
-		svc.ensurePersonalCompany(ctx, existing.ID, req.Email, req.Name)
 		return nil
 	}
 
@@ -84,24 +80,7 @@ func (svc *service) SyncUser(ctx context.Context, req dto.SyncUserRequest) error
 		Name:    req.Name,
 		Role:    models.RoleKeyUser,
 	}
-	if err := svc.store.CreateUser(ctx, user); err != nil {
-		return err
-	}
-	svc.ensurePersonalCompany(ctx, user.ID, user.Email, user.Name)
-	return nil
-}
-
-// ensurePersonalCompany is the signup hook (tenancy plan §3.1/D20): every
-// user gets a personal company + claimed owner membership. Best-effort — a
-// failure must not fail the webhook (Clerk would retry the whole sync), and
-// the active-company middleware self-heals on the user's next request.
-func (svc *service) ensurePersonalCompany(ctx context.Context, userID primitive.ObjectID, email, name string) {
-	if email == "" || userID.IsZero() {
-		return
-	}
-	if _, err := svc.store.EnsurePersonalCompany(ctx, userID, email, name); err != nil {
-		log.Warn("personal company mint failed on user sync", "user_id", userID.Hex(), "error", err)
-	}
+	return svc.store.CreateUser(ctx, user)
 }
 
 // DeleteUser soft-deletes a user by stamping deactivated_at. The row is kept
@@ -109,9 +88,9 @@ func (svc *service) ensurePersonalCompany(ctx context.Context, userID primitive.
 // than silently re-provisioning the account.
 //
 // The user ID is returned (NilObjectID if we never had a record for this
-// clerk_id) so the caller can cancel billing. An already-tombstoned user still
-// returns their ID rather than skipping: the webhook retry that lands here is
-// usually one whose Paddle cancellation failed the first time round.
+// clerk_id) so the caller can tear down what hangs off the account. An
+// already-tombstoned user still returns their ID rather than skipping, so a
+// webhook retry can finish a teardown that failed the first time round.
 func (svc *service) DeleteUser(ctx context.Context, clerkID string) (primitive.ObjectID, error) {
 	found, user, err := svc.store.FindUserByClerkIDIncludingDeactivated(ctx, clerkID)
 	if err != nil {

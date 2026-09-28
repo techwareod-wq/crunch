@@ -5,10 +5,7 @@ package models
 // tags and one-off keys stay literal at their use sites.
 const (
 	fieldID        = "_id"
-	fieldUserID    = "user_id"
 	fieldUpdatedAt = "updated_at"
 	fieldCreatedAt = "created_at"
-	fieldStatus    = "status"
 	fieldEmail     = "email"
-	fieldVoiceID   = "voice_id"
 )

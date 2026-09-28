@@ -13,10 +13,4 @@ func Handle(appCtx *config.AppContext) {
 		AllowCORS().
 		WithMethods("POST").
 		WithLogEnabled()
-
-	middleware.Handle("/v1/webhooks/paddle", http.HandlerFunc(HandlePaddleWebhook)).
-		With(appCtx.Middleware()).
-		AllowCORS().
-		WithMethods("POST").
-		WithLogEnabled()
 }

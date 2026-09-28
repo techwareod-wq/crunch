@@ -1,7 +1,6 @@
 package config
 
 import (
-	"encoding/base64"
 	"os"
 	"strconv"
 	"strings"
@@ -27,9 +26,6 @@ const (
 
 	envProduction  = "production"
 	envDevelopment = "development"
-
-	paddleEnvSandbox    = "sandbox"
-	paddleEnvProduction = "production"
 )
 
 type DatabaseConfig struct {
@@ -44,7 +40,7 @@ type ServerConfig struct {
 	AllowedOrigins []string
 	// AllowedHosts is the Host-header allowlist. Empty means no restriction;
 	// when set, requests whose Host is not listed are rejected (see
-	// middleware.HostGuard). Production lists "api.useindexly.com".
+	// middleware.HostGuard). Production lists the public API host.
 	AllowedHosts []string
 }
 
@@ -71,19 +67,13 @@ type LLMConfig struct {
 	DefaultProvider string
 }
 
-type dataForSeoConfigs struct {
-	Username string
-	Password string
-}
-
 type SQSConfig struct {
-	QueueURL                    string
-	SecondaryQueueURL           string
-	DLQUrl                      string
-	WaitTimeSeconds             int
-	VisibilityTimeout           int
-	ClusteringVisibilityTimeout int
-	MaxMessagesPerBatch         int
+	QueueURL            string
+	SecondaryQueueURL   string
+	DLQUrl              string
+	WaitTimeSeconds     int
+	VisibilityTimeout   int
+	MaxMessagesPerBatch int
 }
 
 type AsyncHandlerConfig struct {
@@ -95,54 +85,6 @@ type AsyncHandlerConfig struct {
 	TokenWindow     time.Duration
 }
 
-type TavilyConfig struct {
-	APIKey string
-}
-
-type YouTubeConfig struct {
-	APIKey           string
-	WebshareUsername string
-	WebsharePassword string
-}
-
-type PaddleConfig struct {
-	APIKey        string // PADDLE_API_KEY
-	WebhookSecret string // PADDLE_WEBHOOK_SECRET (notification destination secret, "pdl_ntfset_...")
-	Environment   string // derived from ENVIRONMENT (see EnvConfig.PaddleEnvironment): "sandbox" | "production"
-	ProductID     string // PADDLE_PRODUCT_ID — filter for ListPrices so only our product's plans surface
-	// TeamProductID is the per-seat "Indexly Team" product. EMPTY IS A
-	// SUPPORTED STEADY STATE (the feature ships dark before the Paddle product
-	// exists): no boot validation, no warning spam — the company checkout
-	// guard is the single enforcement point and 400s cleanly while unset.
-	TeamProductID string // PADDLE_TEAM_PRODUCT_ID
-}
-
-type SidecarConfig struct {
-	// SharedSecret authenticates central to the Node sidecar (X-Sidecar-Token
-	// header). The sidecar refuses to boot without its copy, so an empty value
-	// here means every publish fails with UNAUTHORIZED.
-	SharedSecret string // SIDECAR_SHARED_SECRET
-}
-
-// GSCConfig holds the Google Search Console service-account credential.
-// Unlike DataForSEO this is deliberately optional: an empty key means the GSC
-// provider stays nil-safe/disabled and boot proceeds (the analytics surface is
-// values-flagged anyway).
-type GSCConfig struct {
-	// ServiceAccountJSON is the decoded service-account key JSON
-	// (GSC_SERVICE_ACCOUNT_JSON carries it base64-encoded). Empty disables
-	// the provider.
-	ServiceAccountJSON []byte
-}
-
-// GooglePSIConfig holds the PageSpeed Insights API key (audit engine's
-// Performance category). Like GSC this is deliberately optional: an empty
-// key leaves the PSI provider failing loudly per call, which the audit's
-// collector degrades to a constraint — boot proceeds.
-type GooglePSIConfig struct {
-	APIKey string // GOOGLE_PSI_API_KEY
-}
-
 type AppConfig struct {
 	Database     DatabaseConfig
 	Server       ServerConfig
@@ -150,25 +92,16 @@ type AppConfig struct {
 	Clerk        ClerkConfig
 	AWS          AWSConfig
 	LLM          LLMConfig
-	DataForSEO   dataForSeoConfigs
 	SQS          SQSConfig
 	AsyncHandler AsyncHandlerConfig
-	Tavily       TavilyConfig
-	YouTube      YouTubeConfig
-	Paddle       PaddleConfig
-	Sidecar      SidecarConfig
 	Mailer       MailerConfig
-	GSC          GSCConfig
-	GooglePSI    GooglePSIConfig
 	// Values holds the YAML-sourced runtime tunables + external API URLs. The
 	// loaders below read it as their default layer (env vars still override).
 	Values Values
 }
 
-// MailerConfig holds the SMTP transport for transactional email (the company
-// invite-accept links, tenancy plan D3/D19). An empty Host disables sending —
-// flows fall back to surfacing the link in the API response for the dashboard
-// to relay.
+// MailerConfig holds the SMTP transport for transactional email. An empty
+// Host disables sending.
 type MailerConfig struct {
 	Host     string // SMTP_HOST
 	Port     string // SMTP_PORT (default "587")
@@ -177,14 +110,8 @@ type MailerConfig struct {
 	From     string // SMTP_FROM
 }
 
-// LoadCompanyConfig loads the company-tenancy link templates and the SMTP
-// mailer. The templates carry per-env YAML defaults (localhost on
-// integration, the app domain in production); the env vars remain overrides
-// for deployments whose frontend lives elsewhere.
-func (c *AppConfig) LoadCompanyConfig() {
-	if tmpl := strings.TrimSpace(os.Getenv("COMPANY_INVITE_URL_TEMPLATE")); tmpl != "" {
-		c.Values.Company.InviteURLTemplate = tmpl
-	}
+// LoadMailerConfig loads the SMTP mailer transport.
+func (c *AppConfig) LoadMailerConfig() {
 	c.Mailer.Host = os.Getenv("SMTP_HOST")
 	c.Mailer.Port = os.Getenv("SMTP_PORT")
 	if c.Mailer.Port == "" {
@@ -200,15 +127,6 @@ func (c *AppConfig) LoadDatabaseConfig() {
 	c.Database.Name = os.Getenv("MONGO_DB_NAME")
 	if c.Database.Name == "" {
 		c.Database.Name = c.Values.Server.DefaultDBName
-	}
-}
-
-func (c *AppConfig) LoadDataForSEOConfigs() {
-	c.DataForSEO.Username = os.Getenv("DATAFORSEO_USERNAME")
-	c.DataForSEO.Password = os.Getenv("DATAFORSEO_PASSWORD")
-
-	if c.DataForSEO.Username == "" || c.DataForSEO.Password == "" {
-		panic("DATAFORSEO_USERNAME and DATAFORSEO_PASSWORD must be set")
 	}
 }
 
@@ -288,17 +206,6 @@ func (c *EnvConfig) IsDev() bool {
 	return c.Environment == envDevelopment
 }
 
-// PaddleEnvironment derives the Paddle environment from the app environment.
-// Only production talks to live Paddle; development (which doubles as staging)
-// uses sandbox. This is code-controlled (not an env var) so a non-prod
-// deployment can never be pointed at live billing by a mis-set variable.
-func (c *EnvConfig) PaddleEnvironment() string {
-	if c.IsProd() {
-		return paddleEnvProduction
-	}
-	return paddleEnvSandbox
-}
-
 func (c *AppConfig) LoadLLMConfig() {
 	c.LLM.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")
 	c.LLM.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
@@ -325,12 +232,6 @@ func (c *AppConfig) LoadSQSConfig() {
 		visTimeout = c.Values.SQS.VisibilityTimeout
 	}
 	c.SQS.VisibilityTimeout = visTimeout
-
-	clusterVisTimeout := atoiEnv("SQS_CLUSTERING_VISIBILITY_TIMEOUT")
-	if clusterVisTimeout == 0 {
-		clusterVisTimeout = c.Values.SQS.ClusteringVisibilityTimeout
-	}
-	c.SQS.ClusteringVisibilityTimeout = clusterVisTimeout
 
 	// Batch size has no env var — it is a pure YAML tunable.
 	batch := c.Values.SQS.MaxMessagesPerBatch
@@ -382,55 +283,6 @@ func (c *AppConfig) LoadAsyncHandlerConfig() {
 	c.AsyncHandler.TokenWindow = time.Duration(tokenWindowSec) * time.Second
 }
 
-func (c *AppConfig) LoadTavilyConfig() {
-	c.Tavily.APIKey = os.Getenv("TAVILY_API_KEY")
-}
-
-// LoadPaddleConfig loads the Paddle credentials. The Paddle environment is not
-// read from the env — it's derived from ENVIRONMENT (see PaddleEnvironment) so
-// a non-prod deployment can never be pointed at live billing by a stray var.
-// Requires LoadEnvConfig to have run first.
-func (c *AppConfig) LoadPaddleConfig() {
-	c.Paddle.APIKey = os.Getenv("PADDLE_API_KEY")
-	c.Paddle.WebhookSecret = os.Getenv("PADDLE_WEBHOOK_SECRET")
-	c.Paddle.ProductID = os.Getenv("PADDLE_PRODUCT_ID")
-	c.Paddle.TeamProductID = os.Getenv("PADDLE_TEAM_PRODUCT_ID")
-	c.Paddle.Environment = c.Env.PaddleEnvironment()
-}
-
-func (c *AppConfig) LoadSidecarConfig() {
-	c.Sidecar.SharedSecret = os.Getenv("SIDECAR_SHARED_SECRET")
-}
-
-// LoadGSCConfig decodes the Google Search Console service-account key.
-// GSC_SERVICE_ACCOUNT_JSON carries the SA key JSON base64-encoded; unset
-// leaves the provider disabled (boot must not crash), and malformed base64 is
-// logged and treated as unset per the atoiEnv warn-and-degrade convention.
-func (c *AppConfig) LoadGSCConfig() {
-	raw := strings.TrimSpace(os.Getenv("GSC_SERVICE_ACCOUNT_JSON"))
-	if raw == "" {
-		return
-	}
-	decoded, err := base64.StdEncoding.DecodeString(raw)
-	if err != nil {
-		log.Warn("malformed GSC_SERVICE_ACCOUNT_JSON (expected base64-encoded SA key JSON), GSC provider disabled", "error", err)
-		return
-	}
-	c.GSC.ServiceAccountJSON = decoded
-}
-
-func (c *AppConfig) LoadYouTubeConfig() {
-	c.YouTube.APIKey = os.Getenv("YOUTUBE_API_KEY")
-	c.YouTube.WebshareUsername = os.Getenv("WEBSHARE_USERNAME")
-	c.YouTube.WebsharePassword = os.Getenv("WEBSHARE_PASSWORD")
-}
-
-// LoadGooglePSIConfig reads the PageSpeed Insights key. Optional — see
-// GooglePSIConfig.
-func (c *AppConfig) LoadGooglePSIConfig() {
-	c.GooglePSI.APIKey = os.Getenv("GOOGLE_PSI_API_KEY")
-}
-
 func LoadConfigFromEnv(c *AppConfig) error {
 	_ = godotenv.Load()
 	// Environment must be resolved first: it selects which values/<env>/values.yaml
@@ -444,15 +296,8 @@ func LoadConfigFromEnv(c *AppConfig) error {
 	c.LoadClerkConfig()
 	c.LoadAWSConfig()
 	c.LoadLLMConfig()
-	c.LoadDataForSEOConfigs()
 	c.LoadSQSConfig()
 	c.LoadAsyncHandlerConfig()
-	c.LoadTavilyConfig()
-	c.LoadYouTubeConfig()
-	c.LoadPaddleConfig()
-	c.LoadSidecarConfig()
-	c.LoadCompanyConfig()
-	c.LoadGSCConfig()
-	c.LoadGooglePSIConfig()
+	c.LoadMailerConfig()
 	return nil
 }

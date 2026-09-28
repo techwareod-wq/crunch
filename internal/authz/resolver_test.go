@@ -17,7 +17,7 @@ func seedCache(t *testing.T) *RolesCache {
 	roles = append(roles, models.Role{
 		Key:         "support",
 		Rank:        10,
-		Permissions: []string{string(PermAdminAccess), string(PermUsersRead), string(PermTrialsManage)},
+		Permissions: []string{string(PermAdminAccess), string(PermUsersRead)},
 		System:      false,
 	})
 	c, err := NewRolesCacheFromRoles(roles)
@@ -35,16 +35,16 @@ func TestEffectivePermissions(t *testing.T) {
 	if len(su) != len(AllPermissions) {
 		t.Errorf("superuser perms = %d, want all %d", len(su), len(AllPermissions))
 	}
-	if !su[PermPlansWrite] || !su[PermRolesWrite] || !su[PermUsersDelete] {
+	if !su[PermMigrationsRun] || !su[PermRolesWrite] || !su[PermUsersDelete] {
 		t.Error("superuser must hold every superuser-tier permission")
 	}
 
 	// admin: the fixed bundle, and crucially NONE of the superuser-tier set.
 	admin := EffectivePermissions(&models.User{Role: models.RoleKeyAdmin}, cache, authzNow)
-	if !admin[PermAdminAccess] || !admin[PermContentManage] || !admin[PermEntitlementsGrant] {
+	if !admin[PermAdminAccess] || !admin[PermRolesRead] || !admin[PermUsersRead] {
 		t.Error("admin must hold panel access + manage perms")
 	}
-	for _, p := range []Permission{PermRolesWrite, PermUsersDelete, PermPlansWrite} {
+	for _, p := range []Permission{PermRolesWrite, PermUsersDelete, PermMigrationsRun} {
 		if admin[p] {
 			t.Errorf("admin must NOT hold superuser-tier %q", p)
 		}
@@ -64,7 +64,7 @@ func TestEffectivePermissions(t *testing.T) {
 	if got := EffectivePermissions(nil, cache, authzNow); len(got) != 0 {
 		t.Errorf("nil user perms = %v, want none", got)
 	}
-	if Has(&models.User{Role: models.RoleKeyAdmin}, PermContentManage, nil, authzNow) {
+	if Has(&models.User{Role: models.RoleKeyAdmin}, PermRolesRead, nil, authzNow) {
 		t.Error("nil cache must resolve no role permissions (fail closed)")
 	}
 }
@@ -77,10 +77,10 @@ func TestEffectivePermissionsGrantsAndRevokes(t *testing.T) {
 		return models.OverrideEntry{Key: key, ExpiresAt: exp, By: "su@x.com", At: past}
 	}
 
-	// A grant adds a permission the role lacks (support gains content.manage).
-	u := &models.User{Role: "support", ExtraGrants: []models.OverrideEntry{entry(string(PermContentManage), nil)}}
-	if !Has(u, PermContentManage, cache, authzNow) {
-		t.Error("grant must add content.manage")
+	// A grant adds a permission the role lacks (support gains roles.read).
+	u := &models.User{Role: "support", ExtraGrants: []models.OverrideEntry{entry(string(PermRolesRead), nil)}}
+	if !Has(u, PermRolesRead, cache, authzNow) {
+		t.Error("grant must add roles.read")
 	}
 
 	// A revoke removes a permission the role has (support loses users.read).
@@ -91,20 +91,20 @@ func TestEffectivePermissionsGrantsAndRevokes(t *testing.T) {
 
 	// Revoke beats grant on the same key.
 	u = &models.User{Role: "support",
-		ExtraGrants:  []models.OverrideEntry{entry(string(PermContentManage), nil)},
-		ExtraRevokes: []models.OverrideEntry{entry(string(PermContentManage), nil)}}
-	if Has(u, PermContentManage, cache, authzNow) {
+		ExtraGrants:  []models.OverrideEntry{entry(string(PermRolesRead), nil)},
+		ExtraRevokes: []models.OverrideEntry{entry(string(PermRolesRead), nil)}}
+	if Has(u, PermRolesRead, cache, authzNow) {
 		t.Error("revoke must win over grant on the same key")
 	}
 
 	// Expired grant is ignored.
-	u = &models.User{Role: "support", ExtraGrants: []models.OverrideEntry{entry(string(PermContentManage), &past)}}
-	if Has(u, PermContentManage, cache, authzNow) {
+	u = &models.User{Role: "support", ExtraGrants: []models.OverrideEntry{entry(string(PermRolesRead), &past)}}
+	if Has(u, PermRolesRead, cache, authzNow) {
 		t.Error("expired grant must be ignored")
 	}
 	// Live grant (future expiry) applies.
-	u = &models.User{Role: "support", ExtraGrants: []models.OverrideEntry{entry(string(PermContentManage), &future)}}
-	if !Has(u, PermContentManage, cache, authzNow) {
+	u = &models.User{Role: "support", ExtraGrants: []models.OverrideEntry{entry(string(PermRolesRead), &future)}}
+	if !Has(u, PermRolesRead, cache, authzNow) {
 		t.Error("unexpired grant must apply")
 	}
 	// Expired revoke is ignored — the role permission stays.
@@ -166,13 +166,13 @@ func TestExpandKeysAndSubset(t *testing.T) {
 		t.Errorf(`ExpandKeys(["*"]) = %d perms, want all %d`, len(got), len(AllPermissions))
 	}
 	// Unknown keys are dropped.
-	got := ExpandKeys([]string{string(PermContentManage), "nope"})
-	if len(got) != 1 || !got[PermContentManage] {
-		t.Errorf("ExpandKeys dropped-unknown = %v, want {content.manage}", got)
+	got := ExpandKeys([]string{string(PermRolesRead), "nope"})
+	if len(got) != 1 || !got[PermRolesRead] {
+		t.Errorf("ExpandKeys dropped-unknown = %v, want {roles.read}", got)
 	}
 
 	super := ExpandKeys([]string{Wildcard})
-	sub := ExpandKeys([]string{string(PermContentManage), string(PermUsersRead)})
+	sub := ExpandKeys([]string{string(PermRolesRead), string(PermUsersRead)})
 	if !IsSubset(sub, super) {
 		t.Error("a role's perms must be a subset of superuser's full set")
 	}

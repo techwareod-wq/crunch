@@ -134,10 +134,10 @@ func TestAudit_SelfDecodedBodyIsCapturedWhenHandlerReadsIt(t *testing.T) {
 	withRolesCache(t, authz.DefaultRoles())
 	rows := captureAuditInserts(t)
 
-	raw := `{"userId":"aaaabbbbccccddddeeeeffff","webEntityId":"w1"}`
+	raw := `{"userId":"aaaabbbbccccddddeeeeffff","itemId":"w1"}`
 	Handle("/test/audit-selfdecode", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Mirrors the web-entity PATCH / plans upsert handlers, which decode
-		// their own body instead of using DeserializeJson.
+		// Mirrors handlers that decode their own body instead of using
+		// DeserializeJson.
 		if _, err := io.ReadAll(r.Body); err != nil {
 			t.Errorf("handler body read: %v", err)
 		}

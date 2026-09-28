@@ -1,16 +1,18 @@
 server:
   port: "3090"
-  defaultDBName: "central"
+  defaultDBName: "crunch"
   awsRegion: "ap-south-1"
   # Only requests whose Host header matches are served; direct-IP requests
   # (Host = the IP) are rejected. Loopback and /health are always allowed.
-  allowedHosts:
-    - "api.useindexly.com"
+  # TODO: set to the production API host once the domain exists, e.g.
+  #   allowedHosts:
+  #     - "api.crunch.example"
+  allowedHosts: []
 
 # Operational tuning for the /v1/admin surface. Access is granted solely by
 # DB-backed RBAC roles (rolesmigrate seeds them); nothing here grants admin.
 admin:
-  # Interval for the plans/roles cache DB refresh (StartRefresh).
+  # Interval for the roles cache DB refresh (StartRefresh).
   cacheRefreshSeconds: 60
   # Page-size bounds for the admin list endpoints.
   pagination:
@@ -21,20 +23,17 @@ admin:
 
 async:
   workerCount: 40
-  llmWorkerCount: 80
+  llmWorkerCount: 40
   maxRetries: 3
   shutdownSeconds: 60
-  # Scale tier: 10M input + 2M output tokens/min per model bucket. Tracker
-  # counts input+output combined across all models, resets on a fixed window
-  # (bursts can ~2x briefly), so 1.5M keeps worst-case output under the 2M
-  # OTPM bucket. 429s are retried in the anthropic client if we overshoot.
+  # Cumulative LLM token budget (input+output) per window; secondary-queue
+  # consumption pauses once it is reached. Size it to your provider tier.
   tokenLimit: 1500000
   tokenWindowSeconds: 60
 
 sqs:
   waitTimeSeconds: 20
   visibilityTimeout: 600
-  clusteringVisibilityTimeout: 900  # 15 min — clustering's single large LLM call can outrun the default
   maxMessagesPerBatch: 10  # SQS hard-caps ReceiveMessage at 10
   gatedPauseSeconds: 5  # gated consumer backpressure sleep when the token gate is closed
 
@@ -45,13 +44,6 @@ idempotency:
 
 webhooks:
   maxClerkBodyBytes: 1048576    # 1 << 20
-  maxPaddleBodyBytes: 2097152   # 2 << 20
-  paddleProcessingTimeoutSeconds: 30
-
-paddle:
-  apiCallTimeoutSeconds: 10
-  priceCacheTTLSeconds: 300            # 5 minutes
-  webhookTimestampToleranceSeconds: 60 # 1 minute
 
 s3:
   presignPutExpirySeconds: 3600        # 60 minutes
@@ -59,14 +51,14 @@ s3:
   maxConcurrency: 10
 
 llm:
-  defaultProvider: "openai"
+  defaultProvider: "anthropic"  # "anthropic" | "openai" | "gemini"; env override LLM_DEFAULT_PROVIDER
   defaultMaxTokens: 5000
   anthropic:
     apiURL: "https://api.anthropic.com/v1/messages"
     apiVersion: "2023-06-01"
     fallbackModel: "claude-haiku-4-5-20251001"
     fallbackMaxTokens: 1024
-    requestTimeoutSeconds: 600  # per-call HTTP timeout; keep under sqs.clusteringVisibilityTimeout (900)
+    requestTimeoutSeconds: 540  # per-call HTTP timeout; keep under sqs.visibilityTimeout (600)
   openai:
     apiURL: "https://api.openai.com/v1/chat/completions"
     fallbackModel: "gpt-4o"
@@ -75,34 +67,9 @@ llm:
     fallbackModel: "gemini-2.0-flash"
 
 apis:
-  # NB: DataForSEO endpoint URLs are intentionally NOT here — they remain
-  # package-level consts in internal/providers/impl/dataForSEO.
-  # Shared http.Client used by ApiClient (Tavily, YouTube, DataForSEO, ...).
+  # Shared http.Client used by ApiClient.
   httpClient:
     timeoutSeconds: 60
-  # OnPage rendered-fetch tunables (utils.FetchRenderedWebsiteContent) — the
-  # DataForSEO-primary website fetch in onboarding.
-  dataForSEO:
-    # Task-level status_code DataForSEO returns on success (their errors ride
-    # inside HTTP 200 envelopes).
-    taskOkStatusCode: 20000
-    # Deadline for the whole rendered-fetch flow (instant_pages crawl +
-    # raw_html collection). Browser rendering routinely needs 15-30s, so this
-    # sits above the direct fetch's 20s scrape timeout but below the shared
-    # httpClient cap; on expiry the direct fetch takes over.
-    fetchTimeoutSeconds: 45
-  tavily:
-    searchURL: "https://api.tavily.com/search"
-  youtube:
-    searchURL: "https://www.googleapis.com/youtube/v3/search"
-  # Google PageSpeed Insights (audit engine Performance category).
-  psi:
-    runPagespeedURL: "https://www.googleapis.com/pagespeedonline/v5/runPagespeed"
-  sidecar:
-    # Node sidecar wrapping vendor SDKs (Framer Server API). Compose-internal
-    # service name; never published to the host.
-    baseURL: "http://sidecar:4090"
-    timeoutSeconds: 180  # covers a full Framer site build+publish
   imageGen:
     defaultProvider: "openai"  # "openai" (gpt-image-2) or "gemini"
     gemini:
@@ -115,144 +82,6 @@ apis:
       defaultAspectRatio: "16:9"
       requestTimeoutSeconds: 300  # 5 minutes — image generation is slow
 
-contentGeneration:
-  articleMaxTokens: 16000
-  imageAspectRatio: "16:9"
-  midArticleSectionMaxChars: 1500
-  altTextMaxChars: 125
-  metaAssetsMaxTokens: 300
-  schemaMaxTokens: 2000
-  maxCombinedTranscriptChars: 8000
-  maxTranscriptChars: 8000
-  # Organic SERP results pulled per keyword to mine competitor coverage from.
-  serpFetchDepth: 10
-  # Slug cap for SEO. Truncation lands on a word boundary, so emitted slugs are
-  # usually a little shorter than this.
-  slugMaxLen: 60
-  # Target word count = average competitor word count × this multiplier.
-  articleLengthMultiplier: 1.25
-  internalLinks:
-    maxSitemapURLs: 200
-    fetchTimeoutSeconds: 10
-    maxSitemapBytes: 5242880  # 5 << 20
-
-scheduling:
-  weeks: 4
-  # Post-upgrade publishing cadence (articles/week) applied by ExtendSchedule.
-  upgradeCadence: 15
-
-onboarding:
-  serpDefaultLanguageCode: "en"
-  serpDefaultDepth: 30
-  maxCompetitors: 10
-  # How many competitors auto-discovery seeds; the user tops the list up to
-  # maxCompetitors by hand.
-  discoverCompetitors: 5
-  # Candidate pool fetched for competitor discovery; the LLM filters this down
-  # to discoverCompetitors.
-  competitorSerpDepth: 30
-
-siteIntelligence:
-  userKeywordsLimit: 300
-  competitorKeywordsLimit: 200
-  expandedKeywordsLimit: 900
-  defaultDomainRating: 15
-  funnelClassificationChunkSize: 50
-  # Clustering returns one cluster assignment per keyword for up to
-  # expandedKeywordsLimit keywords, so its output is far larger than the
-  # default budget — size it for the full keyword set to avoid truncation.
-  # 16000 truncated in practice; Sonnet 4.6 caps output at 64000, so there
-  # is room to grow this further if larger keyword sets truncate again.
-  clusterMaxTokens: 50000
-  manualClusterExamplesPerCluster: 5
-  manualClusterMaxTokens: 300
-  # Supporting keywords embedded per cluster in one keyword-data response; the
-  # client pages the remainder on demand.
-  supportingKeywordsPageSize: 10
-  # Hits returned by the keyword-search endpoint, ranked by opportunity score.
-  # Sized for a scrollable picker list, not for browsing the whole keyword set.
-  keywordSearchLimit: 50
-  # Applied as DataForSEO request filters, so these bound the raw candidate set
-  # before any scoring or clustering runs.
-  keywordFilters:
-    maxRankPosition: 30   # organic top-30 only
-    minSearchVolume: 100  # applied as >= (no maxSearchVolume: volume is uncapped)
-    # Difficulty band, relative to the user's domain rating (udr):
-    #   min = max(difficultyFloor, udr - difficultyBelowDR)
-    #   max = udr + difficultyAboveDR
-    # difficultyBelowDR is the same DR anchor as scoring.difficultyDRAnchor.
-    difficultyFloor: 5
-    difficultyBelowDR: 15
-    difficultyAboveDR: 50
-  # "Striking distance": keywords already ranking in this band are flagged
-  # refresh_candidate — cheap wins to re-optimise, not net-new articles.
-  refreshCandidate:
-    minPosition: 8
-    maxPosition: 20
-  manual:
-    hardcodedUsed: 8
-    hardcodedLimit: 10
-    suggestionsApiLimit: 10
-    suggestionsKeep: 5
-    suggestionsMinResults: 3
-    relatedKeywordsDepth: 1
-  scoring:
-    volumeLogAnchor: 100000.0
-    volumeScoreCap: 1.0
-    volumeScoreFloor: 1.0
-    intentScoreBOFU: 1.00
-    intentScoreMOFU: 0.85
-    intentScoreTOFU: 0.70
-    intentScoreDefault: 0.75
-    difficultyScoreNull: 0.5
-    difficultyScoreFloor: 0.0
-    difficultyScoreCap: 1.0
-    difficultyKDScale: 100.0
-    difficultyDRAnchor: 15.0
-    difficultyDRSlope: 0.5
-    weightVolume: 0.40
-    weightDifficulty: 0.40
-    weightFunnel: 0.20
-    opportunityScale: 100.0
-    opportunityGamma: 0.7
-    scorePrecision: 10.0
-  # Trial-sized pipeline (WebEntityContext sie_mode == "trial"). Fetch limits
-  # shadow the full-mode values above; scheduleWeeks/cadence shadow
-  # scheduling.weeks and the WebEntity publishing cadence. maxPersistedKeywords
-  # caps what survives post-processing (sorted volume desc, CPC desc);
-  # maxArticles caps CGE generations started per trial user.
-  trial:
-    userKeywordsLimit: 100        # full: 300
-    competitorKeywordsLimit: 40   # full: 200 (per domain; still all 5 competitors)
-    expandedKeywordsLimit: 120    # full: 900
-    maxPersistedKeywords: 60      # full: no cap
-    clusterCount: 3               # full: 6-10 (prompt range)
-    scheduleWeeks: 1              # full: scheduling.weeks = 4
-    cadence: 5                    # full: WebEntity.Publishing.ArticlesPerWeek
-    maxArticles: 10
-  # Per-SEO-strategy overrides, keyed by strategy id (WebEntity.seo_strategy).
-  # The top-level keywordFilters/scoring above ARE the balanced_growth
-  # strategy, so it needs no entry here. A strategy's keywordFilters block
-  # replaces the whole filter set; its scoring block overrides only the knobs
-  # it lists (the rest inherit from scoring above).
-  strategies:
-    # Easier keywords a weak/new domain (DR < 20) can win sooner: a tight
-    # 10-1000 volume band, a fixed KD window [0, 15] instead of the
-    # udr-relative band, and scoring tilted toward difficulty with a lower
-    # volume anchor so achievable wins rank first.
-    early_footholds:
-      keywordFilters:
-        maxRankPosition: 30
-        minSearchVolume: 10
-        maxSearchVolume: 1000
-        difficultyFloor: 0
-        difficultyMaxAbsolute: 15   # fixed band — difficultyBelowDR/AboveDR unused
-      scoring:
-        volumeLogAnchor: 10000.0    # balanced: 100000.0
-        weightVolume: 0.25          # balanced: 0.40
-        weightDifficulty: 0.55      # balanced: 0.40
-        weightFunnel: 0.20          # balanced: 0.20
-
 cron:
   # Scheduler sweep period. Must be <= the finest job interval; every job's
   # catch-up window must exceed it.
@@ -263,77 +92,6 @@ cron:
   # IANA fallback zone for schedule validation and users with no stored zone.
   defaultZone: "Asia/Kolkata"
   jobs:
-    # SEO daily article sweep: dispatches CGE_ORCHESTRATE for every scheduled
-    # article whose calendar day is TODAY. No backlog catch-up: overdue slots
-    # are skipped (logged) and stay reachable via the dashboard's manual
-    # Generate only.
-    seo_daily_generation:   { enabled: true,  at: "09:00", zone: "Asia/Kolkata" }
-    # Analytics ingest beats — auto-registered per source from the analytics
-    # source registry (names are analytics_<source>). GSC pulls the rolling
-    # [D-5..D-2] window daily; the data for D-2 is settled by 07:00.
-    analytics_gsc:               { enabled: true,  at: "07:00", zone: "Asia/Kolkata" }
-    # Monthly domain-rating snapshot (DataForSEO backlinks summary, 1 call/site).
-    analytics_dfs_domain_rating: { enabled: true,  at: "07:00", zone: "Asia/Kolkata", dayOfMonth: 1 }
-
-company:
-  enabled: false                                                                         # master switch for the user-facing company surface; OFF = every /v1/company/* answers 404. Dark in prod until proven in integration.
-  inviteUrlTemplate: "https://app.useindexly.com/company/accept?token={token}"           # env override COMPANY_INVITE_URL_TEMPLATE
-  inviteTokenTtlHours: 72
-
-gsc:
-  enabled: true                # master switch for the /v1/analytics surface; OFF = every route answers a 404 masquerade. Proven in integration, live in prod since 2026-08-25.
-  # Per-day top-N caps on the GSC Search Analytics pulls for huge sites (rows
-  # kept by clicks desc). A trimmed fetch logs the dropped-row count — no
-  # silent caps.
-  topQueriesPerDay: 1000
-  topPageQueryRowsPerDay: 2500
-  maxPagesPerDay: 5000
-  # How much history a backfill fetches, counted back from the latest settled
-  # date (480 ≈ the API's ~16-month retention). 0 disables backfill.
-  backfillDays: 480
-
-audit:
-  enabled: false                # master switch for the /v1/audit surface (tenant + public lead routes); OFF = 404 masquerade. DRIFT-ALLOWLISTED: live in integration first, dark in prod until launch.
-  artifactTTLDays: 7            # auditArtifact scratch docs prune after this; the report embeds everything user-facing
-  crawl:
-    tenantPageCap: 100          # decision 14 — the primary OnPage cost lever
-    leadPageCap: 10
-    pollIntervalSeconds: 15     # on_page/summary poll cadence
-    pollTimeoutSeconds: 900     # per-attempt poll window; the AUDIT_CRAWL visibility override adds headroom above this
-  sampling:
-    deepPassPages: 8            # decision 15: homepage + 7 most-linked/shallowest
-    leadDeepPassPages: 3
-    sxoPages: 5                 # capped at the run's deep-pass sample size
-  scoring:
-    specVersion: v1             # decision 13 — reweighting is a new spec version, never an edit; v1 = quality-uplift table folded in pre-launch (user decision 2026-08-30)
-    findingsOnly: []            # checkIDs demoted to findings-only (decision 12); snapshotted per run
-  gating:
-    paidCooldownDays: 7         # decision 10 — weekly per-website cadence for paid users
-    leadRunsPerIPPerDay: 3      # decision 16 (attempts count — cost was spent)
-    leadDomainCooldownWeeks: 1  # informational: the ledger claim is ISO-week keyed
-    leadRunsPerDay: 50          # global daily lead circuit breaker
-  llm:
-    # Both audit LLM calls run on Sonnet 5 (user decision 2026-08-30). Sonnet 5
-    # runs adaptive thinking when the request omits a thinking config, and
-    # max_tokens caps thinking + response together — hence the headroom.
-    judgmentModel: claude-sonnet-5
-    narrativeModel: claude-sonnet-5
-    judgmentFallbackModel: claude-haiku-4-5-20251001  # ONE retry on a different model before the judgment soft-fails (quality uplift 4.1)
-    judgmentMaxTokens: 8192
-    narrativeMaxTokens: 4096
-  recheck:
-    perCheckCooldownMinutes: 10 # per-(run, check) re-check cooldown
-    maxPerRunPerDay: 20         # re-checks per run per rolling 24h (attempts count)
-  mentions:
-    enabled: true               # brand-mention footprint collector (~2 SERP calls per audit, ALL run kinds incl. lead funnel — ratified 2026-08-30)
-    serpDepth: 20               # page-1 depth per mention query
-
-styleReplication:
-  enabled: true                # master switch for the /v1/style-replication surface; OFF = every route answers a 404 masquerade.
-  maxRunsPerDay: 50             # runs per web entity per rolling 24h; errored runs don't count
-  minUrls: 1                   # hard floor on the finalized source list (FE soft-warns under 3)
-  maxUrls: 10                  # source-article cap (discovery + finalized list)
-  maxImagesPerURL: 5           # candidate images extracted per scraped article
-  maxSynthesisImages: 12       # approved images actually sent to the vision synthesis call
-  maxContentCharsPerURL: 15000 # body text stored per scraped article
-  fetchTimeoutSeconds: 45      # per-URL scrape + sitemap fetch bound
+    # Demo module (internal/modules/demo): enqueues one DEMO_SUMMARIZE per day.
+    # Dark by default; flip on to prove the cron → queue → LLM path.
+    demo_heartbeat: { enabled: false, at: "09:00", zone: "Asia/Kolkata" }

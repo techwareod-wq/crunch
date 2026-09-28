@@ -1,9 +1,6 @@
 package utils
 
-import (
-	"net/url"
-	"strings"
-)
+import "strings"
 
 func CleanURL(url string) string {
 	url = strings.TrimPrefix(url, "https://")
@@ -12,58 +9,9 @@ func CleanURL(url string) string {
 	return url
 }
 
-// NormalizeGSCPageURL canonicalizes a page URL for Search Console matching:
-// scheme collapsed to https (GSC reports http:// and https:// variants of one
-// page as separate rows — they must share one fact identity so the analytics
-// collision merge can fold them, LLD §3.1a), host lowercased, fragment and
-// query string stripped, trailing slash stripped (root "/" kept), leading
-// "www." collapsed (real subdomains kept — changing this collapse set changes
-// gsc fact identity and requires a full-history replay of the source).
-// The SAME function is applied to GSC page rows at ingest and to our
-// published URLs at publish-stamp time, so equality is symmetric — never
-// normalize one side with anything else. A scheme-less input ("abc.com/blog")
-// is treated as https; anything without a parseable http(s) host returns "".
-func NormalizeGSCPageURL(raw string) string {
-	s := strings.TrimSpace(raw)
-	if s == "" {
-		return ""
-	}
-	if !strings.Contains(s, "://") {
-		s = "https://" + s
-	}
-	u, err := url.Parse(s)
-	if err != nil || u.Host == "" {
-		return ""
-	}
-	scheme := strings.ToLower(u.Scheme)
-	if scheme != "http" && scheme != "https" {
-		return ""
-	}
-	scheme = "https"
-	path := u.EscapedPath()
-	if path == "" {
-		path = "/"
-	}
-	if path != "/" {
-		path = strings.TrimRight(path, "/")
-		if path == "" {
-			path = "/"
-		}
-	}
-	host := strings.ToLower(u.Host)
-	// Collapse the www label like the scheme: Google reports the SERVING
-	// variant (useindexly.com) while user-entered site URLs often carry www —
-	// both must land on one fact identity. Real subdomains (clerk., blog.)
-	// stay distinct.
-	host = strings.TrimPrefix(host, "www.")
-	return scheme + "://" + host + path
-}
-
 // ExtractDomain reduces a website URL to its bare registrable host: no scheme,
 // no "www." prefix, no userinfo/port, no path, query, fragment, or trailing
 // slash — e.g. "https://www.abc.com/blog/" -> "abc.com", "PQR.ai/" -> "pqr.ai".
-// DataForSEO's backlinks summary keys on a domain target, so anything beyond the
-// host would narrow or invalidate the lookup.
 func ExtractDomain(rawURL string) string {
 	s := strings.TrimSpace(rawURL)
 	if i := strings.Index(s, "://"); i != -1 {

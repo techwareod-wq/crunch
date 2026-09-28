@@ -111,15 +111,9 @@ func handleAdminUpsertRole(w http.ResponseWriter, r *http.Request) {
 	}
 	// Every permission key must be a defined constant or the wildcard — an
 	// unknown key resolves to nothing and silently 403s the surface it meant to
-	// open (mirrors validateOverrideKeys in entitlements.go). COMPANY roles
-	// (user_admin/user_user, tenancy plan D17) validate against the company
-	// registry instead — company keys only, and only there.
-	permValid := authz.IsValidRolePermission
-	if authz.IsCompanyRoleKey(req.Key) {
-		permValid = authz.IsValidCompanyRolePermission
-	}
+	// open.
 	for _, p := range req.Permissions {
-		if !permValid(p) {
+		if !authz.IsValidRolePermission(p) {
 			middleware.SendJSONError(w, r, apperrors.ErrUnknownPermissionKey)
 			return
 		}
@@ -162,26 +156,6 @@ func handleAdminUpsertRole(w http.ResponseWriter, r *http.Request) {
 		if err := writeRoleUpdate(w, r, appCtx, writeRole, req.ExpectedUpdatedAt); err != nil {
 			return
 		}
-		respondRole(w, r, appCtx, req.Key)
-		return
-	}
-
-	// COMPANY roles (tenancy plan §5.2/D17): tunable data, but pinned in
-	// shape — they must already exist (minted only by -seed-roles), keep their
-	// rank, and their permission list is already company-registry-validated
-	// above. The global subset guard below is skipped on purpose: callers hold
-	// global permissions, never company ones, and tuning a company bundle
-	// grants the caller nothing (the route is roles.write-gated).
-	if authz.IsCompanyRoleKey(req.Key) {
-		if !found {
-			middleware.SendJSONError(w, r, apperrors.ErrImmutableRole)
-			return
-		}
-		writeRole := &models.Role{Key: req.Key, Rank: existing.Rank, Permissions: req.Permissions, Description: req.Description}
-		if err := writeRoleUpdate(w, r, appCtx, writeRole, req.ExpectedUpdatedAt); err != nil {
-			return
-		}
-		middleware.GetLogger(r).Info("admin tuned company role", "key", req.Key)
 		respondRole(w, r, appCtx, req.Key)
 		return
 	}
@@ -337,14 +311,6 @@ func HandleAdminSetUserRole(w http.ResponseWriter, r *http.Request) {
 	caller := middleware.GetUserFromContext(r)
 	callerPerms := authz.EffectivePermissions(caller, appCtx.RolesCache, now)
 	callerRank := authz.Rank(caller, appCtx.RolesCache)
-
-	// Guard D17 (tenancy plan): company role keys (user_admin/user_user) are
-	// per-membership roles and NEVER assignable as a global user.Role — without
-	// this check any catalog role passes the rank/subset guards below.
-	if authz.IsCompanyRoleKey(req.Role) {
-		middleware.SendJSONError(w, r, apperrors.ErrRoleEscalation)
-		return
-	}
 
 	newRole, ok := appCtx.RolesCache.ByKey(req.Role)
 	if !ok {

@@ -14,7 +14,7 @@ import (
 // reloadTimeout bounds each background catalog reload.
 const reloadTimeout = 10 * time.Second
 
-// RolesCache is the in-memory role catalog, mirroring entitlements.PlansCache:
+// RolesCache is the in-memory role catalog:
 // write-through Reload on every catalog write PLUS a background ticker that
 // bounds staleness for a process that didn't serve the write (rolling deploys
 // briefly run two). Because jwt.go already loads the full user doc on every
@@ -81,7 +81,7 @@ func (c *RolesCache) install(roles []models.Role) error {
 
 // StartRefresh runs Reload every interval until ctx is cancelled (shutdown).
 // Failures are logged and retried next tick — the cache keeps serving the last
-// good snapshot. Mirrors PlansCache.StartRefresh.
+// good snapshot.
 func (c *RolesCache) StartRefresh(ctx context.Context, interval time.Duration) {
 	go func() {
 		ticker := time.NewTicker(interval)
@@ -135,11 +135,8 @@ func (c *RolesCache) Keys() []string {
 
 // buildRoleMap inverts the role list into the key→role map, enforcing key
 // uniqueness (a duplicate key would make ByKey ambiguous) and permission
-// validity. COMPANY roles (user_admin/user_user, tenancy plan D17) validate
-// against the company registry — company keys only, no wildcard, no global
-// keys — while every other role validates against the global registry, which
-// rejects company keys. Either failure rejects the whole snapshot so a bad
-// catalog never starts serving.
+// validity. Either failure rejects the whole snapshot so a bad catalog never
+// starts serving.
 func buildRoleMap(roles []models.Role) (map[string]*models.Role, error) {
 	byKey := make(map[string]*models.Role, len(roles))
 	for i := range roles {
@@ -150,12 +147,8 @@ func buildRoleMap(roles []models.Role) (map[string]*models.Role, error) {
 		if _, dup := byKey[r.Key]; dup {
 			return nil, fmt.Errorf("duplicate role key %q", r.Key)
 		}
-		valid := IsValidRolePermission
-		if IsCompanyRoleKey(r.Key) {
-			valid = IsValidCompanyRolePermission
-		}
 		for _, p := range r.Permissions {
-			if !valid(p) {
+			if !IsValidRolePermission(p) {
 				return nil, fmt.Errorf("role %q has unknown permission %q", r.Key, p)
 			}
 		}

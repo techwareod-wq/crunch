@@ -10,8 +10,8 @@ import (
 // the whole guard model is undermined.
 func TestDefaultRolesInvariants(t *testing.T) {
 	roles := DefaultRoles()
-	if len(roles) != 5 {
-		t.Fatalf("expected exactly 5 seeded roles (3 global + 2 company), got %d", len(roles))
+	if len(roles) != 3 {
+		t.Fatalf("expected exactly 3 seeded roles, got %d", len(roles))
 	}
 
 	byKey := map[string]models.Role{}
@@ -20,29 +20,9 @@ func TestDefaultRolesInvariants(t *testing.T) {
 		if !r.System {
 			t.Errorf("seeded role %q must be System:true", r.Key)
 		}
-		// Company roles validate against the company registry, global roles
-		// against the global one — and never the other way around (D17).
-		valid := IsValidRolePermission
-		if IsCompanyRoleKey(r.Key) {
-			valid = IsValidCompanyRolePermission
-		}
 		for _, p := range r.Permissions {
-			if !valid(p) {
+			if !IsValidRolePermission(p) {
 				t.Errorf("seeded role %q has invalid permission %q", r.Key, p)
-			}
-		}
-	}
-
-	// Company roles: user_admin holds the FULL company set, user_user a strict
-	// subset; neither carries a single global key or the wildcard.
-	ua, uu := byKey[models.CompanyRoleKeyAdmin], byKey[models.CompanyRoleKeyUser]
-	if len(ua.Permissions) != len(AllCompanyPermissions) {
-		t.Errorf("user_admin must hold every company permission, got %v", ua.Permissions)
-	}
-	for _, r := range []models.Role{ua, uu} {
-		for _, p := range r.Permissions {
-			if p == Wildcard || IsKnownPermission(p) {
-				t.Errorf("company role %q must never hold global key %q", r.Key, p)
 			}
 		}
 	}
@@ -71,7 +51,7 @@ func TestDefaultRolesInvariants(t *testing.T) {
 	if !adminSet[string(PermAdminAccess)] {
 		t.Error("admin must hold admin.access")
 	}
-	for _, p := range []Permission{PermRolesWrite, PermUsersDelete, PermPlansWrite} {
+	for _, p := range []Permission{PermRolesWrite, PermUsersDelete, PermMigrationsRun} {
 		if adminSet[string(p)] {
 			t.Errorf("admin must NOT hold superuser-tier %q", p)
 		}

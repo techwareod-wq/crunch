@@ -1,8 +1,6 @@
 // Package mailer implements the interfaces.Mailer over plain SMTP
-// (STARTTLS via net/smtp). Deliberately minimal: the tenancy flows send two
-// short plain-text transactional mails (invite accept, workspace-bind
-// confirm) and treat delivery as best-effort — the accept link always also
-// rides the API response.
+// (STARTTLS via net/smtp). Deliberately minimal: short plain-text
+// transactional mails, with delivery treated as best-effort by callers.
 package mailer
 
 import (
