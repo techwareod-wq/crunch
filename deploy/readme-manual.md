@@ -12,7 +12,7 @@ You will touch four places:
 
 | # | Platform | What you set up |
 |---|----------|-----------------|
-| 1 | AWS ECR | Two image repositories + lifecycle policies |
+| 1 | AWS ECR | One image repository + lifecycle policy |
 | 2 | AWS IAM | GitHub OIDC provider, a role for GitHub Actions, a role for the EC2 instance |
 | 3 | GitHub | Repo Actions variables + secret |
 | 4 | EC2 server | Docker + Compose, the deploy directory, env files |
@@ -29,16 +29,15 @@ Before you start, note down three values — you'll need them repeatedly:
 
 Console → search **ECR** → **Elastic Container Registry**. Make sure the region selector (top-right) shows your region.
 
-### 1.1 Create the two repositories
+### 1.1 Create the repository
 
 1. **Private registry → Repositories → Create repository**
-2. Repository name: `central`
+2. Repository name: `crunch`
 3. Leave everything else at defaults (mutable tags, AES-256 encryption) → **Create repository**
-4. Repeat for a second repository named `central-sidecar`
 
 ### 1.2 Lifecycle policy (recommended — keep last 10 images)
 
-For **each** of the two repositories:
+For the repository:
 
 1. Click the repository name → left sidebar **Lifecycle policy** → **Create rule**
 2. Rule priority: `1`
@@ -52,10 +51,10 @@ For **each** of the two repositories:
 On the Repositories list, each repo's URI looks like:
 
 ```
-<account-id>.dkr.ecr.<region>.amazonaws.com/central
+<account-id>.dkr.ecr.<region>.amazonaws.com/crunch
 ```
 
-The part before `/central` — `<account-id>.dkr.ecr.<region>.amazonaws.com` — is your **ECR registry URL**. You'll need it for the server's `.env` in step 4.4.
+The part before `/crunch` — `<account-id>.dkr.ecr.<region>.amazonaws.com` — is your **ECR registry URL**. You'll need it for the server's `.env` in step 4.4.
 
 ---
 
@@ -73,7 +72,7 @@ Lets GitHub Actions authenticate to AWS with short-lived tokens instead of store
 4. Audience: `sts.amazonaws.com`
 5. **Add provider**
 
-### 2.2 Role for GitHub Actions (`github-actions-central-ecr`)
+### 2.2 Role for GitHub Actions (`github-actions-crunch-ecr`)
 
 This role is what the workflow assumes to push images and trigger the deploy.
 
@@ -81,9 +80,9 @@ This role is what the workflow assumes to push images and trigger the deploy.
 2. Trusted entity type: **Web identity**
 3. Identity provider: `token.actions.githubusercontent.com`
 4. Audience: `sts.amazonaws.com`
-5. GitHub organization: `atharva-ng`, repository: `central`, branch: `main` (this restricts the role so only the `main` branch of that repo can assume it)
+5. GitHub organization: `atharva-ng`, repository: `crunch`, branch: `main` (this restricts the role so only the `main` branch of that repo can assume it)
 6. **Next** — don't attach any policies yet → **Next**
-7. Role name: `github-actions-central-ecr` → **Create role**
+7. Role name: `github-actions-crunch-ecr` → **Create role**
 
 Open the created role → **Trust relationships** tab and verify it matches this (replace `<ACCOUNT_ID>`; edit via **Edit trust policy** if the wizard produced something looser):
 
@@ -96,7 +95,7 @@ Open the created role → **Trust relationships** tab and verify it matches this
     "Action": "sts:AssumeRoleWithWebIdentity",
     "Condition": {
       "StringEquals": {"token.actions.githubusercontent.com:aud": "sts.amazonaws.com"},
-      "StringLike": {"token.actions.githubusercontent.com:sub": "repo:atharva-ng/central:ref:refs/heads/main"}
+      "StringLike": {"token.actions.githubusercontent.com:sub": "repo:atharva-ng/crunch:ref:refs/heads/main"}
     }
   }]
 }
@@ -115,8 +114,7 @@ Now add two **inline policies** (role page → **Permissions** tab → **Add per
      "Action": ["ecr:BatchCheckLayerAvailability", "ecr:CompleteLayerUpload",
                 "ecr:InitiateLayerUpload", "ecr:PutImage", "ecr:UploadLayerPart",
                 "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"],
-     "Resource": ["arn:aws:ecr:<AWS_REGION>:<ACCOUNT_ID>:repository/central",
-                  "arn:aws:ecr:<AWS_REGION>:<ACCOUNT_ID>:repository/central-sidecar"]}
+     "Resource": ["arn:aws:ecr:<AWS_REGION>:<ACCOUNT_ID>:repository/crunch"]}
   ]
 }
 ```
@@ -135,9 +133,9 @@ Now add two **inline policies** (role page → **Permissions** tab → **Add per
 }
 ```
 
-Finally, copy the role's **ARN** from the top of the role page (`arn:aws:iam::<ACCOUNT_ID>:role/github-actions-central-ecr`) — you'll paste it into GitHub in step 3.
+Finally, copy the role's **ARN** from the top of the role page (`arn:aws:iam::<ACCOUNT_ID>:role/github-actions-crunch-ecr`) — you'll paste it into GitHub in step 3.
 
-### 2.3 Instance role for the EC2 server (`central-server`)
+### 2.3 Instance role for the EC2 server (`crunch-server`)
 
 Lets the server pull from ECR and be reached by SSM — no AWS keys on the box.
 
@@ -148,13 +146,13 @@ Lets the server pull from ECR and be reached by SSM — no AWS keys on the box.
 3. Search and tick both:
     - `AmazonEC2ContainerRegistryReadOnly` (image pulls)
     - `AmazonSSMManagedInstanceCore` (lets the workflow's SSM step reach the instance)
-4. **Next** → Role name: `central-server` → **Create role** (the console creates the matching instance profile automatically)
+4. **Next** → Role name: `crunch-server` → **Create role** (the console creates the matching instance profile automatically)
 
 **Attach it to the instance:**
 
 1. EC2 console → **Instances** → select your instance
 2. **Actions → Security → Modify IAM role**
-3. Choose `central-server` → **Update IAM role**
+3. Choose `crunch-server` → **Update IAM role**
 
 The SSM agent is preinstalled and running on Amazon Linux 2023, so a few minutes after attaching the role the instance should appear in **Systems Manager → Fleet Manager**. If it doesn't show up, reboot the instance (or restart the agent: `sudo systemctl restart amazon-ssm-agent`).
 
@@ -175,7 +173,7 @@ Go to the repo on github.com → **Settings → Secrets and variables → Action
 
 | Name | Value |
 |------|-------|
-| AWS_ROLE_ARN | arn:aws:iam::<ACCOUNT_ID>:role/github-actions-central-ecr (from step 2.2) |
+| AWS_ROLE_ARN | arn:aws:iam::<ACCOUNT_ID>:role/github-actions-crunch-ecr (from step 2.2) |
 
 That's everything the workflow (`.github/workflows/ci-cd.yml`) reads — it needs no other credentials.
 
@@ -207,25 +205,25 @@ docker compose version   # should print a v2.x version
 
 ### 4.3 Copy the deploy files
 
-Copy `deploy.sh` and `docker-compose.prod.yml` from this repo's `deploy/` directory to **exactly** `/home/ec2-user/central-deploy/` — the workflow's SSM step invokes `/home/ec2-user/central-deploy/deploy.sh` by that absolute path. From your machine:
+Copy `deploy.sh` and `docker-compose.prod.yml` from this repo's `deploy/` directory to **exactly** `/home/ec2-user/crunch-deploy/` — the workflow's SSM step invokes `/home/ec2-user/crunch-deploy/deploy.sh` by that absolute path. From your machine:
 
 ```bash
-scp deploy/deploy.sh deploy/docker-compose.prod.yml ec2-user@<server>:/home/ec2-user/central-deploy/
+scp deploy/deploy.sh deploy/docker-compose.prod.yml ec2-user@<server>:/home/ec2-user/crunch-deploy/
 ```
 
-(Create the directory first if needed: `ssh ec2-user@<server> mkdir -p /home/ec2-user/central-deploy`.)
+(Create the directory first if needed: `ssh ec2-user@<server> mkdir -p /home/ec2-user/crunch-deploy`.)
 
 Make the script executable:
 
 ```bash
-chmod +x /home/ec2-user/central-deploy/deploy.sh
+chmod +x /home/ec2-user/crunch-deploy/deploy.sh
 ```
 
 This is the last time anything is copied from the repo — from now on the server only pulls images from ECR.
 
 ### 4.4 Create the deploy `.env`
 
-Create `/home/ec2-user/central-deploy/.env` with the two values `deploy.sh` needs:
+Create `/home/ec2-user/crunch-deploy/.env` with the two values `deploy.sh` needs:
 
 ```bash
 AWS_REGION=<your-region>
@@ -236,7 +234,7 @@ ECR_REGISTRY=<account-id>.dkr.ecr.<your-region>.amazonaws.com
 
 ### 4.5 Runtime app config
 
-Both containers read their runtime config from `/etc/central/central.env` via `env_file` — make sure it exists and contains the app's env (including `SIDECAR_SHARED_SECRET`; the images bake in `values/`). This file is not part of this setup guide's scope — it stays wherever your existing app config lives.
+The container reads its runtime config from `/etc/crunch/crunch.env` via `env_file` — make sure it exists and contains the app's env (see `.env.example`; the image bakes in `values/`). This file is not part of this setup guide's scope — it stays wherever your existing app config lives.
 
 ---
 
@@ -245,21 +243,21 @@ Both containers read their runtime config from `/etc/central/central.env` via `e
 1. **Server-side dry run** — on the instance:
 
     ```bash
-    cd /home/ec2-user/central-deploy
+    cd /home/ec2-user/crunch-deploy
     ./deploy.sh
     ```
 
     This should log in to ECR without any configured credentials (proving the instance role works), then fail to pull only because no images exist yet — that's expected on the very first run.
 
-2. **First real deploy** — merge or push a commit to `main`. In the repo's **Actions** tab watch the `CI/CD` workflow: both test jobs → *Build & push to ECR* (proves the OIDC role + `ecr-push` policy) → *Deploy on server (SSM)* (proves the `ssm-deploy` policy + instance role). The deploy step's log shows the compose pull/up output and `docker compose ps` from the server.
+2. **First real deploy** — merge or push a commit to `main`. In the repo's **Actions** tab watch the `CI/CD` workflow: the test job → *Build & push to ECR* (proves the OIDC role + `ecr-push` policy) → *Deploy on server (SSM)* (proves the `ssm-deploy` policy + instance role). The deploy step's log shows the compose pull/up output and `docker compose ps` from the server.
 
-3. **On the box** — `docker compose -f docker-compose.prod.yml ps` should show `central` (published on `127.0.0.1:3090`) and `central-sidecar` healthy.
+3. **On the box** — `docker compose -f docker-compose.prod.yml ps` should show `crunch` (published on `127.0.0.1:3090`) healthy.
 
 
 ### Manual deploy / rollback (any time later)
 
 ```bash
-cd /home/ec2-user/central-deploy
+cd /home/ec2-user/crunch-deploy
 ./deploy.sh                       # deploy :latest
 IMAGE_TAG=main-<git-sha> ./deploy.sh   # pin any previous commit's build (rollback)
 ```
@@ -268,8 +266,8 @@ IMAGE_TAG=main-<git-sha> ./deploy.sh   # pin any previous commit's build (rollba
 
 ## Troubleshooting
 
-- **Actions step "Configure AWS credentials" fails with `Not authorized to perform sts:AssumeRoleWithWebIdentity`** — trust policy mismatch. Re-check step 2.2: the `sub` condition must be exactly `repo:atharva-ng/central:ref:refs/heads/main`, and the OIDC provider must exist.
+- **Actions step "Configure AWS credentials" fails with `Not authorized to perform sts:AssumeRoleWithWebIdentity`** — trust policy mismatch. Re-check step 2.2: the `sub` condition must be exactly `repo:atharva-ng/crunch:ref:refs/heads/main`, and the OIDC provider must exist.
 - **Build & push fails with an ECR permission error** — the `ecr-push` inline policy region/account/repo ARNs don't match the actual repositories (step 2.2).
-- **SSM step hangs then fails / `InvalidInstanceId`** — the instance isn't SSM-managed: the `central-server` role isn't attached, or the agent hasn't picked it up (step 2.3). Check Systems Manager → Fleet Manager for the instance.
+- **SSM step hangs then fails / `InvalidInstanceId`** — the instance isn't SSM-managed: the `crunch-server` role isn't attached, or the agent hasn't picked it up (step 2.3). Check Systems Manager → Fleet Manager for the instance.
 - **`deploy.sh` can't log in to ECR on the server** — the instance role is missing `AmazonEC2ContainerRegistryReadOnly`, or `.env` has the wrong `ECR_REGISTRY`/`AWS_REGION`.
-- **Containers start but the app misbehaves** — check `/etc/central/central.env`; both services read it, and the sidecar additionally pins `PORT=4090` in compose.
+- **Containers start but the app misbehaves** — check `/etc/crunch/crunch.env`.

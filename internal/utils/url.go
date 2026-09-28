@@ -34,10 +34,7 @@ func ExtractDomain(rawURL string) string {
 
 // BrandFromURL reduces a website URL to its brand token: the registrable
 // domain's second-level label — e.g. "https://www.hubspot.com/pricing" ->
-// "hubspot", "app.notion.so" -> "app". Used to build a "%brand%" not_like filter
-// that drops a domain's own navigational/branded keywords. Returns "" when no
-// host is present, in which case the caller skips the brand filter (a "%%"
-// pattern would match — and exclude — everything).
+// "hubspot", "app.notion.so" -> "app". Returns "" when no host is present.
 func BrandFromURL(rawURL string) string {
 	domain := ExtractDomain(rawURL)
 	if i := strings.Index(domain, "."); i != -1 {

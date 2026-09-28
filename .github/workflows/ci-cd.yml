@@ -16,9 +16,8 @@ permissions:
   id-token: write # OIDC token for assuming the AWS role
 
 env:
-  ECR_REPO_CENTRAL: central
-  ECR_REPO_SIDECAR: central-sidecar
-  # Both branches share the two ECR repos; the mutable tag tells them apart:
+  ECR_REPO: crunch
+  # Both branches share the ECR repo; the mutable tag tells them apart:
   # main → :latest, integration → :integration. SHA tags are unique either way.
   MUTABLE_TAG: ${{ github.ref_name == 'main' && 'latest' || github.ref_name }}
   # Immutable per-build tag, prefixed by branch so each environment's ECR
@@ -26,8 +25,8 @@ env:
   BUILD_TAG: ${{ github.ref_name }}-${{ github.sha }}
 
 jobs:
-  test-central:
-    name: Test central (Go)
+  test:
+    name: Test (Go)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,34 +42,10 @@ jobs:
       - name: Test
         run: go test ./...
 
-  test-sidecar:
-    name: Test sidecar (Node)
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: sidecar
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: sidecar/package-lock.json
-
-      - name: Install
-        run: npm ci
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Test
-        run: npm test
-
   build-and-push:
     name: Build & push to ECR
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/integration')
-    needs: [test-central, test-sidecar]
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -87,29 +62,17 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
-      - name: Build & push central
+      - name: Build & push crunch
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           provenance: false
           tags: |
-            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPO_CENTRAL }}:${{ env.MUTABLE_TAG }}
-            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPO_CENTRAL }}:${{ env.BUILD_TAG }}
-          cache-from: type=gha,scope=central
-          cache-to: type=gha,scope=central,mode=max
-
-      - name: Build & push sidecar
-        uses: docker/build-push-action@v6
-        with:
-          context: sidecar
-          push: true
-          provenance: false
-          tags: |
-            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPO_SIDECAR }}:${{ env.MUTABLE_TAG }}
-            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPO_SIDECAR }}:${{ env.BUILD_TAG }}
-          cache-from: type=gha,scope=sidecar
-          cache-to: type=gha,scope=sidecar,mode=max
+            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ env.MUTABLE_TAG }}
+            ${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPO }}:${{ env.BUILD_TAG }}
+          cache-from: type=gha,scope=crunch
+          cache-to: type=gha,scope=crunch,mode=max
 
   deploy:
     name: Deploy on server (SSM)
@@ -132,8 +95,8 @@ jobs:
           CMD_ID=$(aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name AWS-RunShellScript \
-            --comment "central ${GITHUB_REF_NAME} deploy ${GITHUB_SHA::12}" \
-            --parameters '{"commands":["IMAGE_TAG=${{ env.BUILD_TAG }} /home/ec2-user/central-deploy/deploy.sh"],"executionTimeout":["900"]}' \
+            --comment "crunch ${GITHUB_REF_NAME} deploy ${GITHUB_SHA::12}" \
+            --parameters '{"commands":["IMAGE_TAG=${{ env.BUILD_TAG }} /home/ec2-user/crunch-deploy/deploy.sh"],"executionTimeout":["900"]}' \
             --query Command.CommandId --output text)
           echo "SSM command id: $CMD_ID"
 

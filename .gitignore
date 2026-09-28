@@ -19,10 +19,6 @@
 # Dependency directory
 /vendor/
 
-# Node sidecar
-sidecar/node_modules/
-sidecar/dist/
-
 # Environment
 .env
 .env.local

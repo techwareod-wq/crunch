@@ -1,7 +1,6 @@
 // Package jsonx extracts JSON values from LLM output that may wrap them in
 // prose or code fences — the one shared extractor behind every structured
-// LLM response in the repo (the agent brain's decision parse, the SIE
-// clustering response, and any future caller).
+// LLM response in the repo.
 //
 // Why not a naive slice: models wrap output in preambles and trailing
 // sign-offs that survive fence stripping, and a first-'{'-to-last-'}' slice

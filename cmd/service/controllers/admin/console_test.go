@@ -100,7 +100,7 @@ func TestHandleAdminListAuditActions_PassesFiltersAndPages(t *testing.T) {
 		if targetUserID != target || adminEmail != "admin@x.com" || page != 2 || limit != 10 {
 			t.Errorf("seam args = (%q, %q, %d, %d)", targetUserID, adminEmail, page, limit)
 		}
-		return []models.AdminAction{{AdminEmail: adminEmail, Method: "POST", Path: "/v1/admin/seo-blog/retry", Status: 202}}, 11, nil
+		return []models.AdminAction{{AdminEmail: adminEmail, Method: "POST", Path: "/v1/admin/demo/dispatch", Status: 202}}, 11, nil
 	})
 
 	rec := httptest.NewRecorder()

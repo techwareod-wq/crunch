@@ -1,5 +1,4 @@
-// Command rolesmigrate is the RBAC bootstrap / recovery tool (centralized-
-// roles-rbac plan §8). It seeds the role catalog, promotes explicitly named
+// Command rolesmigrate is the RBAC bootstrap / recovery tool. It seeds the role catalog, promotes explicitly named
 // emails to superusers, and backfills legacy user docs missing a role.
 //
 // Lockout recovery has two hatches:

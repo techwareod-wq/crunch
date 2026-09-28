@@ -3,9 +3,7 @@
 // handler calls the same service method as its user-facing twin, passing the
 // target's ID — ownership filters keep working because they filter on whatever
 // userId they are handed. Authorization is the DB-backed RBAC gate enforced by
-// middleware.WithAdminAuthorization; admin routes never take the subscription
-// gate (an admin's own subscription is irrelevant, and the target's is often
-// precisely what's broken).
+// middleware.WithAdminAuthorization.
 package admin
 
 import (
@@ -19,8 +17,8 @@ import (
 	"github.com/atharva-ng/crunch/internal/models"
 )
 
-// findUserByID is a seam for tests (mirrors the hasValidSubscription seam in
-// internal/middleware) so target resolution runs without a live Mongo.
+// findUserByID is a seam for tests so target resolution runs without a live
+// Mongo.
 var findUserByID = models.FindUserByID
 
 // resolveTargetUser validates the admin-supplied target user id and loads the

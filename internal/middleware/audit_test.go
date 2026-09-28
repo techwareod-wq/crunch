@@ -61,7 +61,7 @@ func TestAudit_MutatingRequestByAdminIsRecorded(t *testing.T) {
 	}{UserID: "0123456789abcdef01234567", Note: "retry"}
 
 	r := httptest.NewRequest(http.MethodPost, "/test/audit-mutation", nil)
-	r.Header.Set(adminActionHeader, "seo-blog.retry")
+	r.Header.Set(adminActionHeader, "demo.dispatch")
 	ctx := context.WithValue(r.Context(), UserContextKey, &models.User{Role: models.RoleKeyAdmin, Email: "admin@x.com"})
 	ctx = context.WithValue(ctx, DeserializerContextKey, body)
 	rec := httptest.NewRecorder()
@@ -80,7 +80,7 @@ func TestAudit_MutatingRequestByAdminIsRecorded(t *testing.T) {
 	if row.Status != http.StatusAccepted {
 		t.Errorf("row.Status = %d, want 202", row.Status)
 	}
-	if row.ActionID != "seo-blog.retry" {
+	if row.ActionID != "demo.dispatch" {
 		t.Errorf("row.ActionID = %q", row.ActionID)
 	}
 	if row.TargetUserID != "0123456789abcdef01234567" {

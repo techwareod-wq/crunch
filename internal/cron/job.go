@@ -29,7 +29,7 @@ type Job struct {
 	Process pipeline.ProcessType // what gets enqueued per unit
 
 	// CatchUp is how long after an occurrence the job may still fire (a restart
-	// spanning 08:30 fires the nudge at 08:37, not never). Must exceed the
+	// spanning 08:30 fires the job at 08:37, not never). Must exceed the
 	// scheduler tick or the job can never fire at all — validated at build.
 	CatchUp time.Duration
 	// CatchUpAll fires EVERY missed occurrence in the CatchUp window instead of
@@ -75,9 +75,9 @@ type Unit struct {
 	// IdempotencyKey is the message ID the dispatch is keyed on — the consumer
 	// idempotency gate collapses duplicate dispatches of the same key. Empty
 	// uses DefaultUnitKey (per job+occurrence+user). Set it only to widen the
-	// dedupe: per-entity jobs widen to the entity (an articleID — the per-user
-	// default would dedupe a user's second due article into oblivion);
-	// user-facing beats widen to the local DAY (one nudge per day is the
+	// dedupe: per-entity jobs widen to the entity (an item ID — the per-user
+	// default would dedupe a user's second due item into oblivion);
+	// user-facing beats widen to the local DAY (one reminder per day is the
 	// product invariant, and a day key kills every mechanical double-fire at
 	// once — CatchUpAll windows, DST fall-back repeats, claim-takeover reruns).
 	IdempotencyKey string

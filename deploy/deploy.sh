@@ -21,7 +21,7 @@ fi
 
 # Compose derives the project name from this directory; pin it so container
 # ownership doesn't change if the checkout is ever moved or renamed.
-export COMPOSE_PROJECT_NAME=central-deploy
+export COMPOSE_PROJECT_NAME=crunch-deploy
 
 aws ecr get-login-password --region "$AWS_REGION" |
   docker login --username AWS --password-stdin "$ECR_REGISTRY"
@@ -29,7 +29,7 @@ aws ecr get-login-password --region "$AWS_REGION" |
 # The fixed container_names conflict with any same-named container this
 # project doesn't own (started by hand, or by compose under another project
 # name). Remove those so `up` can create ours; compose recreates its own.
-for name in central central-sidecar; do
+for name in crunch; do
   cid=$(docker ps -aq --filter "name=^${name}$")
   [ -z "$cid" ] && continue
   owner=$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$cid")

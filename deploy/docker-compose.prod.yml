@@ -2,11 +2,11 @@
 # Lives on the server next to a .env file defining ECR_REGISTRY and AWS_REGION
 # (see deploy/README.md). IMAGE_TAG defaults to latest; pin a build tag (main-<sha> / integration-<sha>) to roll back.
 services:
-  central:
-    image: ${ECR_REGISTRY}/central:${IMAGE_TAG:-latest}
-    container_name: central
+  crunch:
+    image: ${ECR_REGISTRY}/crunch:${IMAGE_TAG:-latest}
+    container_name: crunch
     restart: unless-stopped
-    env_file: /etc/central/central.env
+    env_file: /etc/crunch/crunch.env
     ports:
       - "127.0.0.1:3090:3090"
     logging:
@@ -24,36 +24,3 @@ services:
       resources:
         limits:
           memory: 1g
-
-  # Stateless protocol adapter (Framer Server API today). Compose-internal
-  # only — never published to the host; central reaches it via
-  # values.apis.sidecar.baseURL (http://sidecar:4090) with the shared-secret
-  # header. Intentionally NOT a depends_on of central: a down sidecar
-  # surfaces as transient publish errors (retried), not a boot failure.
-  sidecar:
-    image: ${ECR_REGISTRY}/central-sidecar:${IMAGE_TAG:-latest}
-    container_name: central-sidecar
-    restart: unless-stopped
-    env_file: /etc/central/central.env     # provides SIDECAR_SHARED_SECRET
-    # The shared env file also carries PORT=3090 (central's port). Pin the
-    # sidecar's port here so that value can't bleed in — `environment` wins
-    # over `env_file`. central reaches this at http://sidecar:4090.
-    environment:
-      PORT: "4090"
-    expose:
-      - "4090"
-    logging:
-      driver: json-file
-      options:
-        max-size: "20m"
-        max-file: "3"
-    healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4090/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    deploy:
-      resources:
-        limits:
-          memory: 256m

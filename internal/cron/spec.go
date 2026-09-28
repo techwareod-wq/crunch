@@ -11,15 +11,15 @@ import (
 type SpecKind int
 
 const (
-	// SpecAtLocal fires at a fixed wall-clock time in ONE zone (the SEO sweep's
-	// global 09:00). One occurrence per allowed day.
+	// SpecAtLocal fires at a fixed wall-clock time in ONE zone (e.g. a global
+	// 09:00 sweep). One occurrence per allowed day.
 	SpecAtLocal SpecKind = iota
 	// SpecAtUserLocal fires at a fixed wall-clock minute in EACH USER'S OWN
 	// zone (the 17:00 weekly check). Mechanically a sweep: every tick owns a
 	// window, and the resolver's zone-grouped query matches users whose zone
 	// currently sits inside the target minute's window — weekday evaluated per
 	// zone too (Friday in Auckland while Kolkata is still Thursday must not
-	// nudge Kolkata).
+	// fire for Kolkata).
 	SpecAtUserLocal
 	// SpecEvery fires once per interval window — the shape behind user-CHOSEN
 	// time sweeps (digest at 22:17): the window mechanism guarantees no minute

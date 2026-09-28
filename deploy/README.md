@@ -1,7 +1,7 @@
 # Deployment
 
-Merges to `main` trigger `.github/workflows/ci-cd.yml`: both test suites run, the
-`central` and `central-sidecar` images are built and pushed to ECR tagged `latest` and
+Merges to `main` trigger `.github/workflows/ci-cd.yml`: the tests run, the
+`crunch` image is built and pushed to ECR tagged `latest` and
 the git SHA, then the workflow runs `deploy.sh` on the server via AWS SSM — pinned to
 that commit's image tag. The server (Amazon Linux EC2) never touches git — it pulls
 images from ECR and runs them via `docker-compose.prod.yml`.
@@ -25,19 +25,17 @@ export ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 export INSTANCE_ID=<your-ec2-instance-id>  # the server the workflow deploys to
 ```
 
-### 1. Create the ECR repositories
+### 1. Create the ECR repository
 
 ```bash
-aws ecr create-repository --repository-name central --region $AWS_REGION
-aws ecr create-repository --repository-name central-sidecar --region $AWS_REGION
+aws ecr create-repository --repository-name crunch --region $AWS_REGION
 ```
 
 Optional but recommended — keep only recent images so storage doesn't grow forever:
 
 ```bash
 POLICY='{"rules":[{"rulePriority":1,"description":"keep last 10","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":10},"action":{"type":"expire"}}]}'
-aws ecr put-lifecycle-policy --repository-name central --lifecycle-policy-text "$POLICY" --region $AWS_REGION
-aws ecr put-lifecycle-policy --repository-name central-sidecar --lifecycle-policy-text "$POLICY" --region $AWS_REGION
+aws ecr put-lifecycle-policy --repository-name crunch --lifecycle-policy-text "$POLICY" --region $AWS_REGION
 ```
 
 ### 2. Let GitHub Actions push (OIDC — no long-lived keys)
@@ -50,7 +48,7 @@ aws iam create-open-id-connect-provider \
   --client-id-list sts.amazonaws.com
 ```
 
-Create a role only the `main` branch of `atharva-ng/central` can assume:
+Create a role only the `main` branch of `atharva-ng/crunch` can assume:
 
 ```bash
 cat > /tmp/trust.json <<EOF
@@ -62,12 +60,12 @@ cat > /tmp/trust.json <<EOF
     "Action": "sts:AssumeRoleWithWebIdentity",
     "Condition": {
       "StringEquals": {"token.actions.githubusercontent.com:aud": "sts.amazonaws.com"},
-      "StringLike": {"token.actions.githubusercontent.com:sub": "repo:atharva-ng/central:ref:refs/heads/main"}
+      "StringLike": {"token.actions.githubusercontent.com:sub": "repo:atharva-ng/crunch:ref:refs/heads/main"}
     }
   }]
 }
 EOF
-aws iam create-role --role-name github-actions-central-ecr \
+aws iam create-role --role-name github-actions-crunch-ecr \
   --assume-role-policy-document file:///tmp/trust.json
 
 cat > /tmp/ecr-push.json <<EOF
@@ -79,12 +77,11 @@ cat > /tmp/ecr-push.json <<EOF
      "Action": ["ecr:BatchCheckLayerAvailability", "ecr:CompleteLayerUpload",
                 "ecr:InitiateLayerUpload", "ecr:PutImage", "ecr:UploadLayerPart",
                 "ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"],
-     "Resource": ["arn:aws:ecr:${AWS_REGION}:${ACCOUNT_ID}:repository/central",
-                  "arn:aws:ecr:${AWS_REGION}:${ACCOUNT_ID}:repository/central-sidecar"]}
+     "Resource": ["arn:aws:ecr:${AWS_REGION}:${ACCOUNT_ID}:repository/crunch"]}
   ]
 }
 EOF
-aws iam put-role-policy --role-name github-actions-central-ecr \
+aws iam put-role-policy --role-name github-actions-crunch-ecr \
   --policy-name ecr-push --policy-document file:///tmp/ecr-push.json
 ```
 
@@ -102,7 +99,7 @@ cat > /tmp/ssm-deploy.json <<EOF
   ]
 }
 EOF
-aws iam put-role-policy --role-name github-actions-central-ecr \
+aws iam put-role-policy --role-name github-actions-crunch-ecr \
   --policy-name ssm-deploy --policy-document file:///tmp/ssm-deploy.json
 ```
 
@@ -111,7 +108,7 @@ aws iam put-role-policy --role-name github-actions-central-ecr \
 ```bash
 gh variable set AWS_REGION --body "$AWS_REGION"
 gh variable set EC2_INSTANCE_ID --body "$INSTANCE_ID"
-gh secret set AWS_ROLE_ARN --body "arn:aws:iam::${ACCOUNT_ID}:role/github-actions-central-ecr"
+gh secret set AWS_ROLE_ARN --body "arn:aws:iam::${ACCOUNT_ID}:role/github-actions-crunch-ecr"
 ```
 
 (Or set them under repo Settings → Secrets and variables → Actions.)
@@ -126,16 +123,16 @@ No AWS keys on the box — attach an IAM role to the instance with
 and running on AL2023):
 
 ```bash
-aws iam create-role --role-name central-server \
+aws iam create-role --role-name crunch-server \
   --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ec2.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
-aws iam attach-role-policy --role-name central-server \
+aws iam attach-role-policy --role-name crunch-server \
   --policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
-aws iam attach-role-policy --role-name central-server \
+aws iam attach-role-policy --role-name crunch-server \
   --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
-aws iam create-instance-profile --instance-profile-name central-server
-aws iam add-role-to-instance-profile --instance-profile-name central-server --role-name central-server
+aws iam create-instance-profile --instance-profile-name crunch-server
+aws iam add-role-to-instance-profile --instance-profile-name crunch-server --role-name crunch-server
 aws ec2 associate-iam-instance-profile \
-  --instance-id $INSTANCE_ID --iam-instance-profile Name=central-server
+  --instance-id $INSTANCE_ID --iam-instance-profile Name=crunch-server
 ```
 
 If the instance already has a role, just attach both managed policies to it.
@@ -160,19 +157,19 @@ docker compose version
 
 ### 3. Copy this directory and configure it
 
-Copy `deploy.sh` and `docker-compose.prod.yml` to `/home/ec2-user/central-deploy/`
+Copy `deploy.sh` and `docker-compose.prod.yml` to `/home/ec2-user/crunch-deploy/`
 (exactly that path — the workflow's SSM step invokes
-`/home/ec2-user/central-deploy/deploy.sh`) — this is the last time anything is copied
+`/home/ec2-user/crunch-deploy/deploy.sh`) — this is the last time anything is copied
 from the repo — and create `.env` next to them:
 
 ```bash
-# /home/ec2-user/central-deploy/.env
+# /home/ec2-user/crunch-deploy/.env
 AWS_REGION=<your-region>
 ECR_REGISTRY=<account-id>.dkr.ecr.<your-region>.amazonaws.com
 ```
 
-Runtime app config stays where it already is: `/etc/central/central.env`
-(both services read it via `env_file`; the images bake in `values/`).
+Runtime app config stays where it already is: `/etc/crunch/crunch.env`
+(the service reads it via `env_file`; the image bakes in `values/`).
 
 ## Deploying
 
@@ -184,7 +181,7 @@ run fails if the script fails.
 Manual (re-deploy or roll back) — ssh in and run:
 
 ```bash
-cd /home/ec2-user/central-deploy
+cd /home/ec2-user/crunch-deploy
 ./deploy.sh                    # deploy :latest
 IMAGE_TAG=main-<git-sha> ./deploy.sh  # pin any previous commit's build
 ```
@@ -200,10 +197,10 @@ A second EC2 instance running the same stack, deployed from the `integration` br
 push to integration → GitHub Actions: test → build → push to ECR (:integration + :sha) → SSM runs deploy.sh on the integration instance
 ```
 
-Everything is shared with production except the instance itself: same two ECR repos
+Everything is shared with production except the instance itself: same ECR repo
 (the mutable tag `integration` vs `latest` tells the builds apart; SHA tags are
 per-commit and unique either way), same GitHub Actions role (trust extended to the
-`integration` branch), same `central-server` instance role (attached to both boxes).
+`integration` branch), same `crunch-server` instance role (attached to both boxes).
 
 Set the variables first (note the extra one):
 
@@ -216,20 +213,19 @@ export INTEGRATION_INSTANCE_ID=<integration-ec2-instance-id>
 
 ### 1. ECR — nothing to create
 
-The existing `central` and `central-sidecar` repos hold both environments' images.
+The existing `crunch` repo holds both environments' images.
 Recommended: bump the lifecycle policy from 10 to 20 kept images, since two branches
-now push into the same repos (otherwise active integration pushes can expire
+now push into the same repo (otherwise active integration pushes can expire
 production rollback tags):
 
 ```bash
 POLICY='{"rules":[{"rulePriority":1,"description":"keep last 20","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":20},"action":{"type":"expire"}}]}'
-aws ecr put-lifecycle-policy --repository-name central --lifecycle-policy-text "$POLICY" --region $AWS_REGION
-aws ecr put-lifecycle-policy --repository-name central-sidecar --lifecycle-policy-text "$POLICY" --region $AWS_REGION
+aws ecr put-lifecycle-policy --repository-name crunch --lifecycle-policy-text "$POLICY" --region $AWS_REGION
 ```
 
 ### 2. Extend the GitHub Actions role to the `integration` branch
 
-Replace the trust policy of `github-actions-central-ecr` so both branches can assume
+Replace the trust policy of `github-actions-crunch-ecr` so both branches can assume
 it (`update-assume-role-policy` overwrites the whole document):
 
 ```bash
@@ -243,18 +239,18 @@ cat > /tmp/trust.json <<EOF
     "Condition": {
       "StringEquals": {"token.actions.githubusercontent.com:aud": "sts.amazonaws.com"},
       "StringLike": {"token.actions.githubusercontent.com:sub": [
-        "repo:atharva-ng/central:ref:refs/heads/main",
-        "repo:atharva-ng/central:ref:refs/heads/integration"
+        "repo:atharva-ng/crunch:ref:refs/heads/main",
+        "repo:atharva-ng/crunch:ref:refs/heads/integration"
       ]}
     }
   }]
 }
 EOF
-aws iam update-assume-role-policy --role-name github-actions-central-ecr \
+aws iam update-assume-role-policy --role-name github-actions-crunch-ecr \
   --policy-document file:///tmp/trust.json
 ```
 
-The `ecr-push` inline policy needs no change (same repos). Rewrite `ssm-deploy` so the
+The `ecr-push` inline policy needs no change (same repo). Rewrite `ssm-deploy` so the
 role can also trigger deploys on the integration instance (`put-role-policy`
 overwrites the whole policy, so both instance ARNs must be listed):
 
@@ -271,7 +267,7 @@ cat > /tmp/ssm-deploy.json <<EOF
   ]
 }
 EOF
-aws iam put-role-policy --role-name github-actions-central-ecr \
+aws iam put-role-policy --role-name github-actions-crunch-ecr \
   --policy-name ssm-deploy --policy-document file:///tmp/ssm-deploy.json
 ```
 
@@ -289,22 +285,22 @@ Launch the instance, then repeat the production
 [One-time server setup](#one-time-server-setup-amazon-linux-2023-ec2) on it with two
 differences.
 
-Attach the **existing** `central-server` instance profile instead of creating a new
+Attach the **existing** `crunch-server` instance profile instead of creating a new
 role (an instance profile can be attached to any number of instances):
 
 ```bash
 aws ec2 associate-iam-instance-profile \
-  --instance-id $INTEGRATION_INSTANCE_ID --iam-instance-profile Name=central-server
+  --instance-id $INTEGRATION_INSTANCE_ID --iam-instance-profile Name=crunch-server
 ```
 
 Then, exactly as for production: install Docker + the compose plugin, copy `deploy.sh`
-and `docker-compose.prod.yml` to `/home/ec2-user/central-deploy/`, and create the app
-config at `/etc/central/central.env` (with integration-specific values — its own DB,
+and `docker-compose.prod.yml` to `/home/ec2-user/crunch-deploy/`, and create the app
+config at `/etc/crunch/crunch.env` (with integration-specific values — its own DB,
 keys, etc.). The deploy `.env` gets one extra line so manual `./deploy.sh` runs pull
 `:integration` instead of production's `:latest`:
 
 ```bash
-# /home/ec2-user/central-deploy/.env
+# /home/ec2-user/crunch-deploy/.env
 AWS_REGION=<your-region>
 ECR_REGISTRY=<account-id>.dkr.ecr.<your-region>.amazonaws.com
 IMAGE_TAG=integration
@@ -322,7 +318,7 @@ build, push as `:integration` + `:integration-<sha>` — and its deploy job targ
 Manual, on the integration box:
 
 ```bash
-cd /home/ec2-user/central-deploy
+cd /home/ec2-user/crunch-deploy
 ./deploy.sh                       # deploy :integration (default from .env)
 IMAGE_TAG=integration-<git-sha> ./deploy.sh   # pin any previous build (rollback)
 ```

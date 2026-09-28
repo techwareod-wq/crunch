@@ -113,8 +113,8 @@ func resolveUserByClerkID(ctx context.Context, clerkID string) (*models.User, er
 				}
 			}
 			// No primary marker (or none matched) — fall back to the first
-			// address rather than minting an email-less user (tenancy plan
-			// D22; mirrors the Clerk webhook handler's extractor).
+			// address rather than minting an email-less user (mirrors the
+			// Clerk webhook handler's extractor).
 			if newUser.Email == "" {
 				newUser.Email = clerkUsr.EmailAddresses[0].EmailAddress
 			}

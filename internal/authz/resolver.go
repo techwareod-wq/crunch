@@ -15,7 +15,7 @@ import (
 // jwt.go and roles are cached, so this costs zero DB reads. now is injected for
 // tests.
 //
-// Fails closed like the entitlements resolver: a nil user, an unknown/empty
+// Fails closed: a nil user, an unknown/empty
 // role, or a nil cache yields no role-derived permissions. Grants are still
 // applied (they can never carry admin.access or superuser-tier keys — the API
 // rejects those — so a grant on a role-less user is inert: it can add a

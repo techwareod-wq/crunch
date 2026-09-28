@@ -29,7 +29,7 @@ type AdminAction struct {
 	ActionID     string `bson:"action_id,omitempty" json:"actionId,omitempty"`
 	TargetUserID string `bson:"target_user_id,omitempty" json:"targetUserId,omitempty"`
 	// PayloadHash is the SHA-256 hex of the request payload. The raw payload
-	// is deliberately never stored (drafts carry full article content).
+	// is deliberately never stored (it may carry user content).
 	PayloadHash string    `bson:"payload_hash,omitempty" json:"payloadHash,omitempty"`
 	Status      int       `bson:"status" json:"status"`
 	CreatedAt   time.Time `bson:"created_at" json:"createdAt"`

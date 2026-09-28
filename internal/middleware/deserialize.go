@@ -16,8 +16,8 @@ import (
 var sanitizerPolicy = bluemonday.StrictPolicy()
 
 // maxJSONBodyBytes caps the size of a JSON request body the decoder will read
-// into memory. 1 MB comfortably covers the largest legitimate payload (a full
-// article draft) while preventing an oversized body from exhausting memory.
+// into memory. 1 MB comfortably covers any legitimate JSON payload while
+// preventing an oversized body from exhausting memory.
 const maxJSONBodyBytes = 1 << 20 // 1 MB
 
 // DecodeJSONBody reads the request body and unmarshals it into a value of type T.

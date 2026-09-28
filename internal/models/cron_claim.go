@@ -30,7 +30,7 @@ type CronClaim struct {
 const cronClaimsCollection = "cron_claims"
 
 // cronClaimTTL bounds how long claim rows are kept for inspection ("did the
-// 08:30 nudge fire on the 4th?"). Well past every CatchUp window.
+// 08:30 reminder fire on the 4th?"). Well past every CatchUp window.
 const cronClaimTTL = 30 * 24 * time.Hour
 
 // EnsureCronClaimIndexes creates the unique (job, occurrence) key the claim
