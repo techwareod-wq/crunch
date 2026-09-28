@@ -1,0 +1,142 @@
+package admin
+
+import (
+	"context"
+	"net/http"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
+
+	"github.com/atharva-ng/crunch/internal/config"
+	apperrors "github.com/atharva-ng/crunch/internal/errors"
+	"github.com/atharva-ng/crunch/internal/middleware"
+	"github.com/atharva-ng/crunch/internal/models"
+	"github.com/atharva-ng/crunch/internal/services/accountService"
+)
+
+// Seams for guard tests (findUserByID idiom from target.go).
+var (
+	findUserByIDIncludingDeactivated = models.FindUserByIDIncludingDeactivated
+
+	deleteWebEntityDataFn = func(r *http.Request, userID primitive.ObjectID, adminEmail string) (*accountService.DeletionReport, error) {
+		return config.GetAppContext(r).InternalServices.AccountService.DeleteWebEntityData(r.Context(), userID, adminEmail)
+	}
+	deleteUserAccountFn = func(r *http.Request, target *models.User, adminEmail string) (*accountService.DeletionReport, error) {
+		return config.GetAppContext(r).InternalServices.AccountService.DeleteUserAccount(r.Context(), target, adminEmail)
+	}
+)
+
+// resolveTargetUserIncludingDeactivated is resolveTargetUser without the
+// active filter, for the delete-user endpoint ONLY: mid-cascade the Clerk
+// user.deleted webhook may tombstone the target, and a retry of the delete
+// must still resolve it to finish the teardown. Every other admin endpoint
+// keeps the deliberate 404-on-deactivated behavior.
+func resolveTargetUserIncludingDeactivated(r *http.Request, userId string) (*models.User, *http.Request, *apperrors.Error) {
+	if userId == "" {
+		return nil, r, apperrors.ErrInvalidRequestBody
+	}
+	if _, err := primitive.ObjectIDFromHex(userId); err != nil {
+		return nil, r, apperrors.ErrInvalidRequestBody
+	}
+
+	found, target, err := findUserByIDIncludingDeactivated(r.Context(), userId)
+	if err != nil {
+		middleware.GetLogger(r).Error("admin target user lookup failed", "error", err, "target_user_id", userId)
+		return nil, r, apperrors.ErrAdminCheckFailed
+	}
+	if !found {
+		return nil, r, apperrors.ErrUserNotFound
+	}
+
+	adminUser := middleware.GetUserFromContext(r)
+	logger := middleware.GetLogger(r).With(
+		"admin_email", adminUser.Email,
+		"target_user_id", target.ID.Hex(),
+		"target_email", target.Email,
+	)
+	ctx := context.WithValue(r.Context(), middleware.LoggerContextKey, logger)
+	return target, r.WithContext(ctx), nil
+}
+
+// --- SEO flow deletion: POST /v1/admin/web-entity/delete (users.delete) ---
+
+type adminDeleteWebEntityRequest struct {
+	UserID string `json:"userId"`
+}
+
+// HandleAdminDeleteWebEntity destroys the target's whole SEO flow (web entity
+// + every related doc + best-effort S3 images) and their billing docs (Paddle
+// cancel-now, then hard delete). The user account itself survives. No guards
+// beyond the users.delete permission: deleting anyone's SEO data is a
+// legitimate support op, and the typed-email confirm on the frontend is the
+// brake. Targets are resolved through the active filter — a tombstoned user's
+// leftovers are the delete-user cascade's job.
+func HandleAdminDeleteWebEntity(w http.ResponseWriter, r *http.Request) {
+	req, ok := r.Context().Value(middleware.DeserializerContextKey).(adminDeleteWebEntityRequest)
+	if !ok {
+		middleware.SendJSONError(w, r, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	target, r, appErr := resolveTargetUser(r, req.UserID)
+	if appErr != nil {
+		middleware.SendJSONError(w, r, appErr)
+		return
+	}
+
+	adminUser := middleware.GetUserFromContext(r)
+	report, err := deleteWebEntityDataFn(r, target.ID, adminUser.Email)
+	if err != nil {
+		middleware.GetLogger(r).Error("web entity deletion failed", "error", err)
+		middleware.SendJSONError(w, r, apperrors.ErrAdminCheckFailed)
+		return
+	}
+
+	middleware.GetLogger(r).Info("admin deleted web entity data", "report", report)
+	middleware.SendJSONResponse(w, r, http.StatusOK, map[string]any{"report": report})
+}
+
+// --- account deletion: POST /v1/admin/users/delete (users.delete) ---
+
+type adminDeleteUserRequest struct {
+	UserID string `json:"userId"`
+}
+
+// HandleAdminDeleteUser destroys the target's account: the full SEO-flow
+// cascade, the paddle_customers mapping, the Clerk user, and finally the user
+// doc soft-deleted with PII scrubbed (transactions and adminActions survive).
+// Guards: no self-deletion, and no superuser targets — refusing every
+// superuser subsumes the last-superuser count and forces the demote path,
+// where the ErrLastSuperuser guard already lives.
+func HandleAdminDeleteUser(w http.ResponseWriter, r *http.Request) {
+	req, ok := r.Context().Value(middleware.DeserializerContextKey).(adminDeleteUserRequest)
+	if !ok {
+		middleware.SendJSONError(w, r, apperrors.ErrInvalidRequestBody)
+		return
+	}
+
+	target, r, appErr := resolveTargetUserIncludingDeactivated(r, req.UserID)
+	if appErr != nil {
+		middleware.SendJSONError(w, r, appErr)
+		return
+	}
+
+	adminUser := middleware.GetUserFromContext(r)
+	if target.ID == adminUser.ID {
+		middleware.SendJSONError(w, r, apperrors.ErrSelfDeletion)
+		return
+	}
+	if target.Role == models.RoleKeySuperuser {
+		middleware.SendJSONError(w, r, apperrors.ErrSuperuserUndeletable)
+		return
+	}
+
+	report, err := deleteUserAccountFn(r, target, adminUser.Email)
+	if err != nil {
+		middleware.GetLogger(r).Error("user deletion failed", "error", err)
+		middleware.SendJSONError(w, r, apperrors.ErrAdminCheckFailed)
+		return
+	}
+
+	middleware.GetLogger(r).Info("admin deleted user account", "report", report)
+	middleware.SendJSONResponse(w, r, http.StatusOK, map[string]any{"report": report})
+}

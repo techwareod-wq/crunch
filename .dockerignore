@@ -1,0 +1,35 @@
+# VCS
+.git
+.gitignore
+
+# Env / secrets — pass these at runtime
+.env
+.env.*
+!.env.example
+
+# Build artifacts
+/bin/
+/dist/
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.prof
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Debug binaries
+**/__debug_bin*
+
+# Docs / agent files
+README.md
+CLAUDE.md
+.claude/

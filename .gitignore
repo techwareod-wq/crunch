@@ -1,0 +1,43 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Build output
+/bin/
+/dist/
+
+# Test binary
+*.test
+
+# Go coverage
+*.out
+*.prof
+
+# Dependency directory
+/vendor/
+
+# Node sidecar
+sidecar/node_modules/
+sidecar/dist/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# OS files
+*.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+CLAUDE.md
+# Debug
+__debug_bin*

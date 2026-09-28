@@ -1,0 +1,88 @@
+[
+  {
+    "app_id": "indexly",
+    "tier": "pro",
+    "name": "Pro",
+    "variants": {
+      "monthly": { "price_id": "REPLACE_WITH_PRODUCTION_MONTHLY_PRICE_ID" },
+      "monthly_trial": { "price_id": "REPLACE_WITH_PRODUCTION_MONTHLY_TRIAL_PRICE_ID" }
+    },
+    "features": [
+      "article.generate",
+      "article.schedule",
+      "article.edit",
+      "article.ai_assist",
+      "cms.publish",
+      "keyword.manual",
+      "keyword.research",
+      "site.process",
+      "keyword.view",
+      "article.view",
+      "schedule.view",
+      "analytics.view",
+      "style.replication",
+      "audit.run"
+    ],
+    "trial_features": [
+      "article.generate",
+      "article.schedule",
+      "article.edit",
+      "cms.publish",
+      "keyword.research",
+      "site.process",
+      "keyword.view",
+      "article.view",
+      "schedule.view",
+      "analytics.view",
+      "style.replication",
+      "audit.run"
+    ],
+    "trial_days": 7,
+    "active": true
+  },
+  {
+    "app_id": "indexly",
+    "tier": "team",
+    "name": "Team",
+    "variants": {
+      "monthly": { "price_id": "" }
+    },
+    "features": [
+      "article.generate",
+      "article.schedule",
+      "article.edit",
+      "article.ai_assist",
+      "cms.publish",
+      "keyword.manual",
+      "keyword.research",
+      "site.process",
+      "keyword.view",
+      "article.view",
+      "schedule.view",
+      "analytics.view",
+      "style.replication",
+      "audit.run"
+    ],
+    "trial_features": [],
+    "active": false
+  },
+  {
+    "app_id": "indexly",
+    "tier": "trial_expired",
+    "name": "Trial expired",
+    "variants": {},
+    "features": [
+      "keyword.view",
+      "article.view",
+      "schedule.view",
+      "analytics.view"
+    ],
+    "trial_features": [
+      "keyword.view",
+      "article.view",
+      "schedule.view",
+      "analytics.view"
+    ],
+    "active": false
+  }
+]
