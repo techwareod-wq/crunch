@@ -12,7 +12,6 @@ require (
 	github.com/microcosm-cc/bluemonday v1.0.27
 	github.com/svix/svix-webhooks v1.92.2
 	go.mongodb.org/mongo-driver v1.17.9
-	golang.org/x/image v0.45.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
