@@ -4,13 +4,13 @@
 // collection, no cache:
 //
 //   - every user has one role: user (no panel), admin, or superuser;
-//   - an admin additionally holds any of the assignable permissions editor and
-//     approver (one person can hold both);
+//   - an admin additionally holds any of the assignable permissions editor,
+//     approver and attributes (one person can hold several);
 //   - superuser holds everything and is the only one who changes roles and
 //     permissions. Superusers are minted only by cmd/superuser.
 //
 // Routes gate on a Permission: PermAdmin (any panel user), PermEditor,
-// PermApprover or PermSuperuser.
+// PermApprover, PermAttributes or PermSuperuser.
 package authz
 
 import (
@@ -28,16 +28,19 @@ const (
 	// PermEditor: edit listing drafts, submit/withdraw, answer needs-info,
 	// work the enquiry inbox.
 	PermEditor Permission = "editor"
-	// PermApprover: approve/reject/bulk-approve, archive/restore, edit
-	// attribute and industry rules, read the change log and analytics.
+	// PermApprover: approve/reject/bulk-approve, archive/restore, read the
+	// change log and analytics.
 	PermApprover Permission = "approver"
+	// PermAttributes: create/edit attribute nodes, fields and industry rules;
+	// pick new-node defaults (D-112, D-122).
+	PermAttributes Permission = "attributes"
 	// PermSuperuser: user access management, user deletion, cron force-runs,
-	// data seeds.
+	// hard deletes of attribute nodes/fields/options and industries.
 	PermSuperuser Permission = "superuser"
 )
 
 // Assignable is what a superuser can tick on an admin.
-var Assignable = []Permission{PermEditor, PermApprover}
+var Assignable = []Permission{PermEditor, PermApprover, PermAttributes}
 
 // IsAssignable reports whether p may be stored on a user.
 func IsAssignable(p string) bool {
@@ -56,7 +59,7 @@ func Has(u *models.User, p Permission) bool {
 		switch p {
 		case PermAdmin:
 			return true
-		case PermEditor, PermApprover:
+		case PermEditor, PermApprover, PermAttributes:
 			return slices.Contains(u.Permissions, string(p))
 		}
 	}
@@ -67,7 +70,7 @@ func Has(u *models.User, p Permission) bool {
 // items on it).
 func Effective(u *models.User) []string {
 	out := []string{}
-	for _, p := range []Permission{PermAdmin, PermEditor, PermApprover, PermSuperuser} {
+	for _, p := range []Permission{PermAdmin, PermEditor, PermApprover, PermAttributes, PermSuperuser} {
 		if Has(u, p) {
 			out = append(out, string(p))
 		}

@@ -40,7 +40,7 @@ The WarehouseHub feature modules live in `internal/modules/{attributes,catalog,s
    ```
    go run ./cmd/superuser -emails you@example.com -apply
    ```
-   Other staff: they sign in, then you set their access (admin + editor/approver) from the admin panel.
+   Other staff: they sign in, then you set their access (admin + editor/approver/attributes) from the admin panel.
 3. Start the service with `go run ./cmd/service`.
 4. Check it:
    - `curl localhost:3090/health`

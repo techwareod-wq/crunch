@@ -19,14 +19,13 @@ const (
 
 // Field paths on a `warehouses` doc.
 const (
-	FieldWarehouseStatus  = "status"
-	FieldFitRulesVersion  = "fit_rules_version"
-	FieldLiveAttributes   = "live.attributes"
-	FieldLiveTotalAreaSqm = "live.total_area.sqm"
+	FieldWarehouseStatus = "status"
+	FieldFitRulesVersion = "fit_rules_version"
+	FieldLiveAttributes  = "live.attributes"
 )
 
-// Area is an area as entered plus its canonical sq m (Content.totalArea /
-// availableArea).
+// Area is an area value as entered plus its canonical sq m (field type
+// "area", e.g. warehouse.total_area).
 type Area struct {
 	Value float64 `bson:"value" json:"value"`
 	Unit  string  `bson:"unit"  json:"unit"`
@@ -34,23 +33,10 @@ type Area struct {
 }
 
 // LiveEvalDoc is what recompute reads from a `warehouses` doc: the live
-// content's answers and total area. Content (03) must keep these bson names.
+// content's attribute data. Content (03) must keep this bson name.
 type LiveEvalDoc struct {
 	ID   primitive.ObjectID `bson:"_id"`
 	Live *struct {
-		Attributes map[string]Answer `bson:"attributes"`
-		TotalArea  *Area             `bson:"total_area"`
+		Attributes Attributes `bson:"attributes"`
 	} `bson:"live"`
-}
-
-// EvalInput builds the evaluator input from the live content.
-func (d LiveEvalDoc) EvalInput() EvalInput {
-	if d.Live == nil {
-		return EvalInput{}
-	}
-	in := EvalInput{Attributes: d.Live.Attributes}
-	if d.Live.TotalArea != nil {
-		in.TotalAreaSqm = d.Live.TotalArea.Sqm
-	}
-	return in
 }

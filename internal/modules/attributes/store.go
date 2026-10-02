@@ -17,7 +17,7 @@ import (
 // Module-local collection names (platform collections live in
 // internal/models/collections.go).
 const (
-	collDefs       = "attribute_definitions"
+	collNodes      = "attribute_nodes"
 	collIndustries = "industries"
 )
 
@@ -29,18 +29,20 @@ var (
 // Store is the attribute tree + industries persistence. Mongo in production,
 // memStore in tests.
 type Store interface {
-	// Load reads rulesVersion first, then every def and industry, so the
+	// Load reads rulesVersion first, then every node and industry, so the
 	// snapshot's version never claims more than its data holds.
 	Load(ctx context.Context) (*domain.Snapshot, error)
 	RulesVersion(ctx context.Context) (int64, error)
 	BumpRulesVersion(ctx context.Context) (int64, error)
-	// InsertDef fails with errKeyExists on a duplicate key.
-	InsertDef(ctx context.Context, d *domain.AttrDef) error
-	// ReplaceDef CAS-replaces the doc whose version is expected; a mismatch
-	// is errVersionConflict. d.Version must already be expected+1.
-	ReplaceDef(ctx context.Context, d *domain.AttrDef, expected int) error
+	// InsertNode fails with errKeyExists on a duplicate key.
+	InsertNode(ctx context.Context, n *domain.Node) error
+	// ReplaceNode CAS-replaces the doc whose version is expected; a mismatch
+	// is errVersionConflict. n.Version must already be expected+1.
+	ReplaceNode(ctx context.Context, n *domain.Node, expected int) error
 	InsertIndustry(ctx context.Context, ind *domain.Industry) error
 	ReplaceIndustry(ctx context.Context, ind *domain.Industry, expected int) error
+	// DeleteIndustry CAS-deletes; a mismatch is errVersionConflict.
+	DeleteIndustry(ctx context.Context, key string, expected int) error
 }
 
 // WarehouseStore is the recompute's view of the catalog's `warehouses`
@@ -60,11 +62,11 @@ type WarehouseStore interface {
 // the two `warehouses` indexes this module owns there: {needs_info} for the
 // Needs-info queue (spec 02) and the recompute's stale-page scan.
 func ensureIndexes(ctx context.Context) error {
-	if _, err := models.Collection(collDefs).Indexes().CreateMany(ctx, []mongo.IndexModel{
+	if _, err := models.Collection(collNodes).Indexes().CreateMany(ctx, []mongo.IndexModel{
 		{Keys: bson.D{{Key: "key", Value: 1}}, Options: options.Index().SetUnique(true)},
 		{Keys: bson.D{{Key: "parent_key", Value: 1}, {Key: "order", Value: 1}}},
 	}); err != nil {
-		return fmt.Errorf("ensure attribute_definitions indexes: %w", err)
+		return fmt.Errorf("ensure attribute_nodes indexes: %w", err)
 	}
 	if _, err := models.Collection(collIndustries).Indexes().CreateMany(ctx, []mongo.IndexModel{
 		{Keys: bson.D{{Key: "key", Value: 1}}, Options: options.Index().SetUnique(true)},
@@ -95,15 +97,15 @@ func (s mongoStore) Load(ctx context.Context) (*domain.Snapshot, error) {
 	if err != nil {
 		return nil, fmt.Errorf("read rulesVersion: %w", err)
 	}
-	var defs []domain.AttrDef
-	if err := findAll(ctx, collDefs, &defs); err != nil {
-		return nil, fmt.Errorf("load attribute_definitions: %w", err)
+	var nodes []domain.Node
+	if err := findAll(ctx, collNodes, &nodes); err != nil {
+		return nil, fmt.Errorf("load attribute_nodes: %w", err)
 	}
 	var inds []domain.Industry
 	if err := findAll(ctx, collIndustries, &inds); err != nil {
 		return nil, fmt.Errorf("load industries: %w", err)
 	}
-	return domain.NewSnapshot(v, defs, inds), nil
+	return domain.NewSnapshot(v, nodes, inds), nil
 }
 
 func findAll(ctx context.Context, coll string, out any) error {
@@ -114,20 +116,20 @@ func findAll(ctx context.Context, coll string, out any) error {
 	return cur.All(ctx, out)
 }
 
-func (mongoStore) InsertDef(ctx context.Context, d *domain.AttrDef) error {
-	id, err := models.InsertOne(ctx, collDefs, d)
+func (mongoStore) InsertNode(ctx context.Context, n *domain.Node) error {
+	id, err := models.InsertOne(ctx, collNodes, n)
 	if mongo.IsDuplicateKeyError(err) {
 		return errKeyExists
 	}
 	if err != nil {
 		return err
 	}
-	d.ID = id
+	n.ID = id
 	return nil
 }
 
-func (mongoStore) ReplaceDef(ctx context.Context, d *domain.AttrDef, expected int) error {
-	return casReplace(ctx, collDefs, d.Key, expected, d)
+func (mongoStore) ReplaceNode(ctx context.Context, n *domain.Node, expected int) error {
+	return casReplace(ctx, collNodes, n.Key, expected, n)
 }
 
 func (mongoStore) InsertIndustry(ctx context.Context, ind *domain.Industry) error {
@@ -144,6 +146,17 @@ func (mongoStore) InsertIndustry(ctx context.Context, ind *domain.Industry) erro
 
 func (mongoStore) ReplaceIndustry(ctx context.Context, ind *domain.Industry, expected int) error {
 	return casReplace(ctx, collIndustries, ind.Key, expected, ind)
+}
+
+func (mongoStore) DeleteIndustry(ctx context.Context, key string, expected int) error {
+	res, err := models.Collection(collIndustries).DeleteOne(ctx, bson.M{"key": key, "version": expected})
+	if err != nil {
+		return err
+	}
+	if res.DeletedCount == 0 {
+		return errVersionConflict
+	}
+	return nil
 }
 
 func casReplace(ctx context.Context, coll, key string, expected int, doc any) error {
@@ -193,7 +206,7 @@ func (mongoWarehouses) StaleIDs(ctx context.Context, version int64, after primit
 
 func (mongoWarehouses) LoadEvalDocs(ctx context.Context, ids []primitive.ObjectID) ([]domain.LiveEvalDoc, error) {
 	cur, err := models.Collection(domain.CollWarehouses).Find(ctx, bson.M{"_id": bson.M{"$in": ids}},
-		options.Find().SetProjection(bson.M{domain.FieldLiveAttributes: 1, domain.FieldLiveTotalAreaSqm: 1}))
+		options.Find().SetProjection(bson.M{domain.FieldLiveAttributes: 1}))
 	if err != nil {
 		return nil, err
 	}

@@ -12,7 +12,7 @@ import (
 // the keys.
 const (
 	RoleUser      = "user"      // visitor; no admin panel
-	RoleAdmin     = "admin"     // panel access; editor/approver via Permissions
+	RoleAdmin     = "admin"     // panel access; editor/approver/attributes via Permissions
 	RoleSuperuser = "superuser" // everything; minted only by cmd/superuser
 )
 

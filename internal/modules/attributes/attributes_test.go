@@ -5,385 +5,324 @@ import (
 	"errors"
 	"slices"
 	"testing"
-	"time"
 
-	"go.mongodb.org/mongo-driver/bson/primitive"
-
-	"github.com/atharva-ng/crunch/internal/config"
-	"github.com/atharva-ng/crunch/internal/cron"
-	"github.com/atharva-ng/crunch/internal/modules/attributes/seed"
 	"github.com/atharva-ng/crunch/internal/warehousehub/domain"
 )
 
 var ctx = context.Background()
 
-func TestSeedIsValidAndIdempotent(t *testing.T) {
-	h := newHarness()
-	dry, err := h.svc.Seed(ctx, actor, false)
-	if err != nil {
-		t.Fatalf("seed tree fails its own validation: %v", err)
-	}
-	if !dry.DryRun || len(dry.CreatedDefs) != len(seed.Defs()) || len(dry.CreatedIndustries) != len(seed.Industries()) {
-		t.Fatalf("dry run = %+v", dry)
-	}
-	if v, _ := h.store.RulesVersion(ctx); v != 0 || len(h.store.defs) != 0 {
-		t.Fatal("dry run wrote")
-	}
+func coldStorage() domain.Node {
+	return domain.Node{Key: "cold_storage", ParentKey: domain.RootKey, Name: "Cold storage", Public: true, Filterable: true,
+		Fields: []domain.Field{
+			{Key: "temperature", Name: "Temperature", Type: domain.TypeNumber, Required: true, Public: true, Filterable: true,
+				Unit: &domain.UnitSpec{Family: domain.DimTemp}},
+			{Key: "temp_type", Name: "Type", Type: domain.TypePick, Public: true, Filterable: true,
+				Options: []domain.Option{{Key: "chilled", Label: "Chilled"}, {Key: "frozen", Label: "Frozen"}}},
+		}}
+}
 
-	rep, err := h.svc.Seed(ctx, actor, true)
-	if err != nil {
+func isValidation(err error) bool {
+	var ve *validationError
+	return errors.As(err, &ve)
+}
+
+func TestEnsureRoot(t *testing.T) {
+	h := newHarness()
+	if err := h.svc.EnsureRoot(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if len(rep.CreatedDefs) != len(seed.Defs()) || rep.RulesVersion != 1 {
-		t.Fatalf("apply = %+v", rep)
+	root := h.node(domain.RootKey)
+	if !root.System || len(root.Fields) != len(domain.RootNode().Fields) {
+		t.Fatalf("root = %+v", root)
 	}
-	if len(h.sent) != 1 || h.sent[0].key != "recompute_all:1:rules" {
-		t.Fatalf("dispatches = %+v", h.sent)
-	}
-	if got := len(h.cl.Entries); got != len(seed.Defs())+len(seed.Industries()) {
-		t.Fatalf("change_log entries = %d", got)
-	}
-	if h.cache.Snapshot().Version != 1 {
-		t.Fatal("cache not reloaded")
+	if len(h.sent) != 1 || len(h.cl.Entries) != 1 {
+		t.Fatalf("first boot: sent %d, logged %d", len(h.sent), len(h.cl.Entries))
 	}
 
-	again, err := h.svc.Seed(ctx, actor, true)
-	if err != nil || len(again.CreatedDefs) != 0 || len(again.CreatedIndustries) != 0 || again.RulesVersion != 1 {
-		t.Fatalf("re-run not a no-op: %+v %v", again, err)
+	// Idempotent: a second boot writes nothing.
+	h.sent, h.cl.Entries = nil, nil
+	if err := h.svc.EnsureRoot(ctx); err != nil || len(h.sent)+len(h.cl.Entries) != 0 {
+		t.Fatalf("second boot wrote: %v sent=%d logged=%d", err, len(h.sent), len(h.cl.Entries))
+	}
+
+	// An admin rename survives; a missing system field is re-added.
+	f, _ := root.Field("name")
+	g := f.Clone()
+	g.Name = "Listing title"
+	if _, _, err := h.svc.UpdateField(ctx, actor, domain.RootKey, root.Version, g); err != nil {
+		t.Fatal(err)
+	}
+	h.store.mu.Lock()
+	n := h.store.nodes[domain.RootKey]
+	n.Fields = slices.DeleteFunc(n.Fields, func(f domain.Field) bool { return f.Key == "rent" })
+	h.store.nodes[domain.RootKey] = n
+	h.store.mu.Unlock()
+	if err := h.svc.EnsureRoot(ctx); err != nil {
+		t.Fatal(err)
+	}
+	root = h.node(domain.RootKey)
+	if f, _ := root.Field("name"); f.Name != "Listing title" {
+		t.Errorf("rename lost: %q", f.Name)
+	}
+	if _, ok := root.Field("rent"); !ok {
+		t.Error("rent not re-added")
 	}
 }
 
-// The seeded rules produce the expected verdicts for a realistic pharma site.
-func TestSeedEvaluatesPharmaSite(t *testing.T) {
-	h := newHarness()
-	h.seed()
-	yes := domain.Answer{Status: domain.StatusKnown, V: true}
-	in := domain.EvalInput{TotalAreaSqm: 50000 * domain.SqmPerSqft, Attributes: map[string]domain.Answer{
-		"cold_storage": yes, "gdp_compliant": yes, "temp_tracking": yes, "fire_noc": yes, "power_backup": yes,
-		"zone_segregation": {Status: domain.StatusKnown, V: []string{"quarantine", "received", "waste"}},
-		"dock_doors":       {Status: domain.StatusKnown, V: 10.0},
-		"hazmat_storage":   {Status: domain.StatusKnown, V: false},
-	}}
-	r := domain.Evaluate(h.cache.Snapshot(), in, time.Now())
-	if r.Fit["pharma"] != domain.VerdictFit {
-		t.Fatalf("pharma = %s", r.Fit["pharma"])
+func TestCreateNode(t *testing.T) {
+	h := newHarness().booted()
+	if _, _, err := h.svc.CreateNode(ctx, actor, coldStorage(), ""); !isValidation(err) {
+		t.Fatalf("missing default: %v", err)
 	}
-	if r.Fit["chemicals"] != domain.VerdictNotFit { // DG consent not applicable → F
-		t.Fatalf("chemicals = %s", r.Fit["chemicals"])
-	}
-	if r.Fit["textiles"] != domain.VerdictFit || r.Fit["bonded"] != domain.VerdictUnverified {
-		t.Fatalf("fit = %v", r.Fit)
-	}
-	if r.Calc["dock_ratio"] != 2 {
-		t.Fatalf("dock ratio = %v", r.Calc["dock_ratio"])
-	}
-	if slices.Contains(r.NeedsInfo, "dg_classes") || !slices.Contains(r.NeedsInfo, "deep_freeze") {
-		t.Fatalf("needsInfo = %v", r.NeedsInfo)
-	}
-}
-
-func TestCreateDef(t *testing.T) {
-	h := newHarness()
-	h.seed()
-	d, res, err := h.svc.CreateDef(ctx, actor, domain.AttrDef{Key: "mezzanine", Kind: domain.KindAttribute, Type: domain.TypeBool, Name: "Mezzanine", ParentKey: "infrastructure"})
+	n, res, err := h.svc.CreateNode(ctx, actor, coldStorage(), DefaultUnknown)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if d.Version != 1 || d.Order == 0 || d.UpdatedBy != actor.Email || res.RulesVersion != 2 {
-		t.Fatalf("created = %+v res=%+v", d, res)
+	if n.Version != 1 || n.Order != 1 || n.UpdatedBy != actor.Email || res.RulesVersion != 2 {
+		t.Errorf("node = %+v, res = %+v", n, res)
 	}
-	if len(h.cl.Entries) != 1 || h.cl.Entries[0].Action != domain.ActionCreate || h.cl.Entries[0].Before != nil {
-		t.Fatalf("change_log = %+v", h.cl.Entries)
+	if len(h.sent) != 1 || h.sent[0].key != allKey(2, runRules) {
+		t.Errorf("recompute not dispatched: %+v", h.sent)
 	}
-	if len(h.sent) != 1 || h.sent[0].key != "recompute_all:2:rules" {
-		t.Fatalf("dispatch = %+v", h.sent)
+	if e := h.cl.Entries[0]; e.Action != domain.ActionCreate || e.Meta["default"] != "unknown" {
+		t.Errorf("change log = %+v", e)
 	}
-
-	if _, _, err := h.svc.CreateDef(ctx, actor, domain.AttrDef{Key: "mezzanine", Kind: domain.KindAttribute, Type: domain.TypeBool, Name: "x"}); !errors.Is(err, errKeyExists) {
-		t.Fatalf("dup key: %v", err)
+	if h.cache.Snapshot().Version != 2 {
+		t.Error("cache not reloaded")
 	}
-	var ve *validationError
-	if _, _, err := h.svc.CreateDef(ctx, actor, domain.AttrDef{Key: "bad", Kind: domain.KindAttribute, Type: domain.TypeBool, Name: "x", ParentKey: "floor_strength"}); !errors.As(err, &ve) {
-		t.Fatalf("bad parent: %v", err)
+	if _, _, err := h.svc.CreateNode(ctx, actor, coldStorage(), DefaultNo); !errors.Is(err, errKeyExists) {
+		t.Errorf("duplicate: %v", err)
 	}
-}
-
-func TestUpdateDefCASAndImmutables(t *testing.T) {
-	h := newHarness()
-	h.seed()
-	name := "Cold store"
-	if _, _, err := h.svc.UpdateDef(ctx, actor, DefPatch{Key: "cold_storage", ExpectedVersion: 7, Name: &name}); !errors.Is(err, errVersionConflict) {
-		t.Fatalf("stale version: %v", err)
+	bad := coldStorage()
+	bad.Key, bad.ParentKey = "x", "ghost"
+	if _, _, err := h.svc.CreateNode(ctx, actor, bad, DefaultNo); !isValidation(err) {
+		t.Errorf("unknown parent: %v", err)
 	}
-	d, _, err := h.svc.UpdateDef(ctx, actor, DefPatch{Key: "cold_storage", ExpectedVersion: 1, Name: &name})
-	if err != nil || d.Name != name || d.Version != 2 {
-		t.Fatalf("update: %+v %v", d, err)
-	}
-	e := h.cl.Entries[0]
-	if e.Action != domain.ActionUpdate || e.Before.(*domain.AttrDef).Name != "Cold storage" {
-		t.Fatalf("change_log before = %+v", e.Before)
-	}
-	// Removing an allowed value is refused.
-	vals := []domain.AllowedValue{{Key: "ambient", Label: "Ambient"}}
-	var ve *validationError
-	if _, _, err := h.svc.UpdateDef(ctx, actor, DefPatch{Key: "temp_type", ExpectedVersion: 1, AllowedValues: &vals}); !errors.As(err, &ve) {
-		t.Fatalf("remove option: %v", err)
-	}
-	// Clearing appliesWhen works.
-	d, _, err = h.svc.UpdateDef(ctx, actor, DefPatch{Key: "temp_tracking", ExpectedVersion: 1, ClearAppliesWhen: true})
-	if err != nil || d.AppliesWhen != nil {
-		t.Fatalf("clear appliesWhen: %v", err)
-	}
-	// The snapshot the cache serves was not mutated by the service.
-	if cs, _ := h.cache.Snapshot().Def("temp_type"); len(cs.AllowedValues) != 3 {
-		t.Fatal("cached snapshot mutated")
+	locked := coldStorage()
+	locked.Key = "y"
+	locked.Fields[0].Locked = true
+	n, _, err = h.svc.CreateNode(ctx, actor, locked, DefaultNo)
+	if err != nil || n.Fields[0].Locked {
+		t.Errorf("admin-created field came out locked: %v", err)
 	}
 }
 
-func TestMoveDef(t *testing.T) {
-	h := newHarness()
-	h.seed()
-	var ve *validationError
-	if _, _, err := h.svc.MoveDef(ctx, actor, "cold_storage", "deep_freeze", 0); !errors.As(err, &ve) {
-		t.Fatalf("move under own child: %v", err)
+func TestUpdateNodeCAS(t *testing.T) {
+	h := newHarness().booted()
+	n, _, _ := h.svc.CreateNode(ctx, actor, coldStorage(), DefaultNo)
+	name := "Cold chain"
+	upd, _, err := h.svc.UpdateNode(ctx, actor, NodePatch{Key: n.Key, ExpectedVersion: n.Version, Name: &name})
+	if err != nil || upd.Name != name || upd.Version != 2 {
+		t.Fatalf("update: %v %+v", err, upd)
 	}
-	d, _, err := h.svc.MoveDef(ctx, actor, "cctv", "compliance", 0)
-	if err != nil || d.ParentKey != "compliance" || h.cl.Entries[0].Action != domain.ActionMove {
-		t.Fatalf("move: %+v %v", d, err)
+	if _, _, err := h.svc.UpdateNode(ctx, actor, NodePatch{Key: n.Key, ExpectedVersion: n.Version, Name: &name}); !errors.Is(err, errVersionConflict) {
+		t.Errorf("stale update: %v", err)
 	}
-	if _, _, err := h.svc.MoveDef(ctx, actor, "nope", "", 0); !errors.Is(err, errNotFound) {
-		t.Fatalf("missing: %v", err)
+	if _, _, err := h.svc.UpdateNode(ctx, actor, NodePatch{Key: "ghost"}); !errors.Is(err, errNotFound) {
+		t.Errorf("missing: %v", err)
 	}
 }
 
-func TestReorder(t *testing.T) {
-	h := newHarness()
-	h.seed()
-	kids := h.cache.Snapshot().Children("customs")
-	if len(kids) != 1 {
-		t.Fatalf("customs children = %v", kids)
+func TestMoveAndReorder(t *testing.T) {
+	h := newHarness().booted()
+	cold, _, _ := h.svc.CreateNode(ctx, actor, coldStorage(), DefaultNo)
+	tc := domain.Node{Key: "temp_control", ParentKey: "cold_storage", Name: "Temp control"}
+	tc, _, _ = h.svc.CreateNode(ctx, actor, tc, DefaultNo)
+	haz := domain.Node{Key: "hazmat", ParentKey: domain.RootKey, Name: "Hazmat"}
+	if _, _, err := h.svc.CreateNode(ctx, actor, haz, DefaultNo); err != nil {
+		t.Fatal(err)
 	}
-	roots := slices.Clone(h.cache.Snapshot().Children(""))
-	slices.Reverse(roots)
-	res, err := h.svc.Reorder(ctx, actor, "", roots)
+
+	if _, _, err := h.svc.MoveNode(ctx, actor, "cold_storage", cold.Version, "temp_control", 0); !isValidation(err) {
+		t.Errorf("cycle: %v", err)
+	}
+	root := h.node(domain.RootKey)
+	if _, _, err := h.svc.MoveNode(ctx, actor, domain.RootKey, root.Version, "hazmat", 0); !isValidation(err) {
+		t.Errorf("root move: %v", err)
+	}
+	moved, _, err := h.svc.MoveNode(ctx, actor, "temp_control", tc.Version, "hazmat", 0)
+	if err != nil || moved.ParentKey != "hazmat" || moved.Order != 1 {
+		t.Fatalf("move: %v %+v", err, moved)
+	}
+
+	if _, err := h.svc.ReorderNodes(ctx, actor, domain.RootKey, []string{"hazmat"}); !isValidation(err) {
+		t.Errorf("partial reorder: %v", err)
+	}
+	res, err := h.svc.ReorderNodes(ctx, actor, domain.RootKey, []string{"hazmat", "cold_storage"})
+	if err != nil || !slices.Equal(res.Changed, []string{"hazmat", "cold_storage"}) {
+		t.Fatalf("reorder: %v %+v", err, res)
+	}
+	snap, _ := h.store.Load(ctx)
+	if !slices.Equal(snap.Children(domain.RootKey), []string{"hazmat", "cold_storage"}) {
+		t.Errorf("children = %v", snap.Children(domain.RootKey))
+	}
+}
+
+func TestFields(t *testing.T) {
+	h := newHarness().booted()
+	n, _, _ := h.svc.CreateNode(ctx, actor, coldStorage(), DefaultNo)
+
+	hum := domain.Field{Key: "humidity", Name: "Humidity", Type: domain.TypeNumber,
+		Validations: []domain.Validation{{Kind: domain.ValidMax, Value: 100.0}}}
+	n, _, err := h.svc.CreateField(ctx, actor, n.Key, n.Version, hum)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := h.cache.Snapshot().Children(""); !slices.Equal(got, roots) {
-		t.Fatalf("order = %v want %v (changed %v)", got, roots, res.Changed)
+	if f, _ := n.Field("humidity"); f.Order != 3 {
+		t.Errorf("appended order = %d", f.Order)
 	}
-	var ve *validationError
-	if _, err := h.svc.Reorder(ctx, actor, "", roots[:2]); !errors.As(err, &ve) {
-		t.Fatalf("partial list: %v", err)
+	if _, _, err := h.svc.CreateField(ctx, actor, n.Key, n.Version, hum); !errors.Is(err, errKeyExists) {
+		t.Errorf("duplicate field: %v", err)
+	}
+	badRe := domain.Field{Key: "code", Name: "Code", Type: domain.TypeText, Validations: []domain.Validation{{Kind: domain.ValidRegex, Value: "("}}}
+	if _, _, err := h.svc.CreateField(ctx, actor, n.Key, n.Version, badRe); !isValidation(err) {
+		t.Errorf("bad regex saved: %v", err)
+	}
+
+	// Type immutable (D-130); option removal only via delete (D-138).
+	f, _ := n.Field("temp_type")
+	g := f.Clone()
+	g.Type = domain.TypeMulti
+	if _, _, err := h.svc.UpdateField(ctx, actor, n.Key, n.Version, g); !isValidation(err) {
+		t.Errorf("retype: %v", err)
+	}
+	g = f.Clone()
+	g.Options = g.Options[:1]
+	if _, _, err := h.svc.UpdateField(ctx, actor, n.Key, n.Version, g); !isValidation(err) {
+		t.Errorf("option removed: %v", err)
+	}
+	g = f.Clone()
+	g.Required = true
+	g.Options = append(g.Options, domain.Option{Key: "ambient", Label: "Ambient"})
+	if n, _, err = h.svc.UpdateField(ctx, actor, n.Key, n.Version, g); err != nil {
+		t.Fatalf("legit update: %v", err)
+	}
+
+	// Locked root fields: rename yes, anything else no (D-140).
+	root := h.node(domain.RootKey)
+	area, _ := root.Field("total_area")
+	a := area.Clone()
+	a.Filterable = false
+	if _, _, err := h.svc.UpdateField(ctx, actor, domain.RootKey, root.Version, a); !isValidation(err) {
+		t.Errorf("locked field edited: %v", err)
+	}
+	a = area.Clone()
+	a.Locked = false // can't be unlocked through the API either
+	a.Name = "Built-up area"
+	if root, _, err = h.svc.UpdateField(ctx, actor, domain.RootKey, root.Version, a); err != nil {
+		t.Fatalf("locked rename: %v", err)
+	}
+	if f, _ := root.Field("total_area"); !f.Locked || f.Name != "Built-up area" {
+		t.Errorf("total_area = %+v", f)
+	}
+
+	if _, _, err := h.svc.ReorderFields(ctx, actor, n.Key, n.Version, []string{"humidity", "temp_type"}); !isValidation(err) {
+		t.Errorf("partial field reorder: %v", err)
+	}
+	n, _, err = h.svc.ReorderFields(ctx, actor, n.Key, n.Version, []string{"humidity", "temp_type", "temperature"})
+	if err != nil || n.Fields[0].Key != "humidity" {
+		t.Fatalf("field reorder: %v %+v", err, n.Fields)
 	}
 }
 
-func TestRetireGuardAndConfirm(t *testing.T) {
-	h := newHarness()
-	h.seed()
-
-	// D-042: pharma requires cold_storage (and temp_tracking under it).
-	_, err := h.svc.RetireDef(ctx, actor, "cold_storage", true)
-	var be *retireBlockedError
-	if !errors.As(err, &be) || !slices.Contains(be.Industries, "pharma") || !slices.Contains(be.Industries, "fmcg") {
-		t.Fatalf("guard: %v %+v", err, be)
+func TestIndustries(t *testing.T) {
+	h := newHarness().booted()
+	h.svc.CreateNode(ctx, actor, coldStorage(), DefaultNo)
+	ind := domain.Industry{Key: "food", Name: "Food",
+		Required:  []domain.Condition{{Node: "cold_storage", Cmp: domain.CmpIsYes}},
+		Preferred: []domain.Condition{{Node: "cold_storage", Field: "temperature", Cmp: domain.CmpLte, Value: -18.0}}}
+	got, _, err := h.svc.CreateIndustry(ctx, actor, ind)
+	if err != nil || got.Version != 1 || got.Order != 1 {
+		t.Fatalf("create: %v %+v", err, got)
 	}
-
-	// A leaf nobody references retires directly.
-	if res, err := h.svc.RetireDef(ctx, actor, "defreeze", false); err != nil || !slices.Equal(res.Changed, []string{"defreeze"}) {
-		t.Fatalf("leaf retire: %+v %v", res, err)
+	bad := ind
+	bad.Key = "bad"
+	bad.Required = []domain.Condition{{Node: "ghost", Cmp: domain.CmpIsYes}}
+	if _, _, err := h.svc.CreateIndustry(ctx, actor, bad); !isValidation(err) {
+		t.Errorf("bad rule: %v", err)
 	}
-
-	// deep_freeze has min_temp below it → confirm needed, then bottom-up.
-	_, err = h.svc.RetireDef(ctx, actor, "deep_freeze", false)
-	var ce *confirmRequiredError
-	if !errors.As(err, &ce) || !slices.Equal(ce.Descendants, []string{"min_temp"}) {
-		t.Fatalf("confirm: %v", err)
+	name := "Food & beverage"
+	upd, _, err := h.svc.UpdateIndustry(ctx, actor, IndustryPatch{Key: "food", ExpectedVersion: 1, Name: &name})
+	if err != nil || upd.Version != 2 || len(upd.Preferred) != 1 {
+		t.Fatalf("update: %v %+v", err, upd)
 	}
-	res, err := h.svc.RetireDef(ctx, actor, "deep_freeze", true)
-	if err != nil || !slices.Equal(res.Changed, []string{"min_temp", "deep_freeze"}) {
-		t.Fatalf("retire with confirm: %+v %v", res, err)
+	if _, err := h.svc.DeleteIndustry(ctx, actor, "food", 1); !errors.Is(err, errVersionConflict) {
+		t.Errorf("stale delete: %v", err)
 	}
-	if d, _ := h.cache.Snapshot().Def("min_temp"); !d.Retired {
-		t.Fatal("descendant not retired")
-	}
-	// Retired attrs leave needsInfo.
-	r := domain.Evaluate(h.cache.Snapshot(), domain.EvalInput{Attributes: map[string]domain.Answer{"cold_storage": {Status: domain.StatusKnown, V: true}}}, time.Now())
-	if slices.Contains(r.NeedsInfo, "deep_freeze") {
-		t.Fatal("retired attr still flagged")
-	}
-
-	// appliesWhen references block too: gdp_compliant feeds temp_tracking.
-	if _, err := h.svc.RetireDef(ctx, actor, "gdp_compliant", false); !errors.As(err, &be) || !slices.Contains(be.Attributes, "temp_tracking") {
-		t.Fatalf("appliesWhen guard: %v", err)
-	}
-}
-
-func TestRestoreNeedsActiveParent(t *testing.T) {
-	h := newHarness()
-	h.seed()
-	if _, err := h.svc.RetireDef(ctx, actor, "deep_freeze", true); err != nil {
+	if _, err := h.svc.DeleteIndustry(ctx, actor, "food", 2); err != nil {
 		t.Fatal(err)
 	}
-	var ve *validationError
-	if _, _, err := h.svc.RestoreDef(ctx, actor, "min_temp"); !errors.As(err, &ve) {
-		t.Fatalf("restore under retired parent: %v", err)
+	if _, ok := h.cache.Snapshot().Industry("food"); ok {
+		t.Error("industry still cached")
 	}
-	if d, _, err := h.svc.RestoreDef(ctx, actor, "deep_freeze"); err != nil || d.Retired {
-		t.Fatalf("restore: %v", err)
-	}
-	if d, _, err := h.svc.RestoreDef(ctx, actor, "min_temp"); err != nil || d.Retired {
-		t.Fatalf("restore child: %v", err)
+	last := h.cl.Entries[len(h.cl.Entries)-1]
+	if last.Action != domain.ActionDelete || last.After != nil {
+		t.Errorf("delete log = %+v", last)
 	}
 }
 
-func TestIndustryWrites(t *testing.T) {
-	h := newHarness()
-	h.seed()
-	ind, _, err := h.svc.CreateIndustry(ctx, actor, domain.Industry{Key: "cold_chain", Name: "Cold chain",
-		Required: []domain.Condition{{Attr: "temp_type", Cmp: domain.CmpIn, Value: []any{"chilled", "frozen"}}}})
-	if err != nil || ind.Order != 10 {
-		t.Fatalf("create: %+v %v", ind, err)
-	}
-	if _, ok := ind.Required[0].Value.([]string); !ok {
-		t.Fatalf("value not normalized: %T", ind.Required[0].Value)
-	}
-	var ve *validationError
-	bad := []domain.Condition{{Attr: "nope", Cmp: domain.CmpEq, Value: true}}
-	if _, _, err := h.svc.UpdateIndustry(ctx, actor, IndustryPatch{Key: "cold_chain", ExpectedVersion: 1, Required: &bad}); !errors.As(err, &ve) {
-		t.Fatalf("bad rule: %v", err)
-	}
-	heavy := []domain.Condition{{Attr: "floor_strength", Cmp: domain.CmpGte, Value: 6.0}}
-	if _, _, err := h.svc.UpdateIndustry(ctx, actor, IndustryPatch{Key: "heavy", ExpectedVersion: 1, Required: &heavy}); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := h.svc.UpdateIndustry(ctx, actor, IndustryPatch{Key: "heavy", ExpectedVersion: 1, Required: &heavy}); !errors.Is(err, errVersionConflict) {
-		t.Fatalf("stale: %v", err)
-	}
-
-	// Retiring the industry lifts the D-042 block on its attributes.
-	if _, _, err := h.svc.SetIndustryRetired(ctx, actor, "bonded", true); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.svc.RetireDef(ctx, actor, "bonded", true); err != nil {
-		t.Fatalf("retire after industry retired: %v", err)
-	}
-	// …and restoring the industry now fails: its rule names a retired attr.
-	if _, _, err := h.svc.SetIndustryRetired(ctx, actor, "bonded", false); !errors.As(err, &ve) {
-		t.Fatalf("restore with retired attr: %v", err)
-	}
-}
-
-func TestDispatchFailureDoesNotFailWrite(t *testing.T) {
-	h := newHarness()
-	h.seed()
+func TestTailFailuresDontFailWrite(t *testing.T) {
+	h := newHarness().booted()
 	h.failNext = errBoom
+	if _, _, err := h.svc.CreateNode(ctx, actor, coldStorage(), DefaultNo); err != nil {
+		t.Fatalf("dispatch failure surfaced: %v", err)
+	}
+	h.store.failReplace = errBoom
+	n := h.node("cold_storage")
 	name := "x"
-	if _, res, err := h.svc.UpdateDef(ctx, actor, DefPatch{Key: "cctv", ExpectedVersion: 1, Name: &name}); err != nil || res.RulesVersion != 2 {
-		t.Fatalf("write failed on dispatch error: %v", err)
+	if _, _, err := h.svc.UpdateNode(ctx, actor, NodePatch{Key: n.Key, ExpectedVersion: n.Version, Name: &name}); !errors.Is(err, errBoom) {
+		t.Fatalf("store failure hidden: %v", err)
 	}
 }
 
-func TestRecomputeFanOutAndVersionGuard(t *testing.T) {
-	h := newHarness()
-	h.seed()
-	yes := domain.Answer{Status: domain.StatusKnown, V: true}
-	for i := 0; i < 5; i++ {
-		h.warehouses.add(domain.WarehouseLive, map[string]domain.Answer{"cold_storage": yes})
-	}
-	h.warehouses.add(domain.WarehouseUnpublished, nil)
+func TestRecompute(t *testing.T) {
+	h := newHarness().booted()
+	h.svc.CreateNode(ctx, actor, coldStorage(), DefaultNo)
+	h.svc.CreateIndustry(ctx, actor, domain.Industry{Key: "food", Name: "Food",
+		Required: []domain.Condition{{Node: "cold_storage", Cmp: domain.CmpIsYes}}})
+	v := h.cache.Snapshot().Version
 
-	if err := h.rc.all(ctx, RecomputeAllPayload{RulesVersion: 1, Run: runRules}); err != nil {
+	yes := domain.Attributes{"cold_storage": {Status: domain.StatusYes, Fields: map[string]*domain.FieldValue{"temperature": {V: -20.0}}}}
+	ids := []any{
+		h.warehouses.add(domain.WarehouseLive, yes),
+		h.warehouses.add(domain.WarehouseLive, domain.Attributes{}),
+		h.warehouses.add(domain.WarehouseArchived, domain.Attributes{"cold_storage": {Status: domain.StatusUnknown}}),
+	}
+	h.warehouses.add(domain.WarehouseUnpublished, yes) // never evaluated
+	h.sent = nil
+
+	if err := h.rc.all(ctx, RecomputeAllPayload{RulesVersion: v, Run: runRules}); err != nil {
 		t.Fatal(err)
 	}
-	var keys []string
-	for _, d := range h.sent {
-		keys = append(keys, d.key)
-	}
-	if !slices.Equal(keys, []string{"recompute:1:rules:1", "recompute:1:rules:2", "recompute:1:rules:3"}) {
-		t.Fatalf("batch keys = %v", keys)
+	if len(h.sent) != 2 { // 3 stale docs, batch size 2
+		t.Fatalf("batches = %d", len(h.sent))
 	}
 	for _, d := range h.sent {
 		if err := h.rc.batch(ctx, d.payload.(RecomputeBatchPayload)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if len(h.warehouses.proj) != 5 {
-		t.Fatalf("projections = %d, want 5 (unpublished skipped)", len(h.warehouses.proj))
+	if len(h.warehouses.proj) != len(ids) {
+		t.Fatalf("projections = %d", len(h.warehouses.proj))
 	}
+	fits := map[string]int{}
 	for _, p := range h.warehouses.proj {
-		if p.FitRulesVersion != 1 || !slices.Contains(p.Chips, "cold_storage:yes") {
-			t.Fatalf("projection = %+v", p)
+		if p.FitRulesVersion != v {
+			t.Errorf("version = %d", p.FitRulesVersion)
 		}
+		fits[p.Fit[0]]++
+	}
+	if fits["food:F"] != 1 || fits["food:N"] != 1 || fits["food:U"] != 1 {
+		t.Errorf("fits = %v", fits)
 	}
 
-	// A new rules write → v2. A stale v1 batch arriving late must not
-	// overwrite v2 projections.
-	name := "Cold store"
-	if _, _, err := h.svc.UpdateDef(ctx, actor, DefPatch{Key: "cold_storage", ExpectedVersion: 1, Name: &name}); err != nil {
-		t.Fatal(err)
-	}
+	// Nothing stale now; an older message is dropped.
 	h.sent = nil
-	if err := h.rc.all(ctx, RecomputeAllPayload{RulesVersion: 2}); err != nil {
-		t.Fatal(err)
+	if err := h.rc.all(ctx, RecomputeAllPayload{RulesVersion: v, Run: runRules}); err != nil || len(h.sent) != 0 {
+		t.Errorf("re-run dispatched %d", len(h.sent))
 	}
-	for _, d := range h.sent {
-		_ = h.rc.batch(ctx, d.payload.(RecomputeBatchPayload))
-	}
-	old := domain.Projection{FitRulesVersion: 1}
-	for id := range h.warehouses.proj {
-		if n, _ := h.warehouses.WriteProjections(ctx, map[primitive.ObjectID]domain.Projection{id: old}); n != 0 {
-			t.Fatal("older projection overwrote a newer one")
-		}
-	}
-	for _, p := range h.warehouses.proj {
-		if p.FitRulesVersion != 2 {
-			t.Fatalf("not recomputed to v2: %d", p.FitRulesVersion)
-		}
-	}
-
-	// A superseded recompute_all is dropped; nothing stale is left anyway.
-	h.sent = nil
-	if err := h.rc.all(ctx, RecomputeAllPayload{RulesVersion: 1}); err != nil || len(h.sent) != 0 {
-		t.Fatalf("superseded run dispatched %d", len(h.sent))
-	}
-}
-
-func TestBatchWaitsForNewerSnapshot(t *testing.T) {
-	h := newHarness()
-	h.seed() // v1 in store and cache
-	// Another instance bumped to v2; this cache hasn't seen it yet.
-	h.store.v = 2
-	s, err := h.cache.SnapshotAtLeast(ctx, 2)
-	if err != nil || s.Version != 2 {
-		t.Fatalf("reload on demand: %v", err)
-	}
-	if _, err := h.cache.SnapshotAtLeast(ctx, 3); err == nil {
-		t.Fatal("snapshot older than requested returned")
-	}
-}
-
-func TestSafetyNetKeysDoNotCollide(t *testing.T) {
-	h := newHarness()
-	h.seed()
-	units, err := h.rc.resolveSafetyNet(ctx, cron.Occurrence{Job: JobRecomputeSafetyNet, At: time.Date(2026, 10, 2, 22, 0, 0, 0, time.UTC)})
-	if err != nil || len(units) != 1 {
-		t.Fatal(err)
-	}
-	p := units[0].Payload.(RecomputeAllPayload)
-	if p.RulesVersion != 1 || p.Run != "sn-20261002" || units[0].IdempotencyKey != "recompute_all:1:sn-20261002" {
-		t.Fatalf("unit = %+v", units[0])
-	}
-}
-
-// The safety-net job must pass the cron registry's boot-time validation.
-func TestCronJobRegisters(t *testing.T) {
-	m := New(&config.AppContext{})
-	_, err := cron.BuildJobRegistry(m.CronJobs(), config.CronValues{
-		TickSeconds: 300, ClaimStaleSeconds: 600, DefaultZone: "Asia/Kolkata",
-		Jobs: map[string]config.CronJobValues{string(JobRecomputeSafetyNet): {Enabled: true}},
-	})
-	if err != nil {
-		t.Fatal(err)
+	h.store.BumpRulesVersion(ctx)
+	if err := h.rc.all(ctx, RecomputeAllPayload{RulesVersion: v, Run: runRules}); err != nil || len(h.sent) != 0 {
+		t.Errorf("superseded run dispatched %d", len(h.sent))
 	}
 }

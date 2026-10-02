@@ -19,7 +19,7 @@ type adminSetUserAccessRequest struct {
 	TargetUserID string `json:"targetUserId"`
 	// Role is "user" or "admin". Superusers are minted only by cmd/superuser.
 	Role string `json:"role"`
-	// Permissions: any of "editor", "approver". Only meaningful for admin;
+	// Permissions: any of "editor", "approver", "attributes". Only meaningful for admin;
 	// must be empty for role user.
 	Permissions []string `json:"permissions"`
 	// ExpectedRoleUpdatedAt is the target's role_updated_at as read (null if
@@ -28,7 +28,7 @@ type adminSetUserAccessRequest struct {
 }
 
 // HandleAdminSetUserAccess serves POST /v1/admin/users/access (superuser): set
-// a user's role (user | admin) and an admin's editor/approver permissions.
+// a user's role (user | admin) and an admin's editor/approver/attributes permissions.
 // Staff onboarding is: the person signs in once, then a superuser sets their
 // access here. Superuser accounts are never changed through the API, so a
 // superuser can't be demoted or locked out from the panel.

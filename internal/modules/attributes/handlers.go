@@ -13,31 +13,49 @@ import (
 )
 
 // Admin routes (spec 02 "Admin endpoints"). Reads load straight from Mongo
-// (≈60 docs) so an admin never edits against another instance's stale cache.
+// (a few dozen docs) so an admin never edits against another instance's
+// stale cache.
 
-type moveRequest struct {
-	Key          string `json:"key"`
-	NewParentKey string `json:"newParentKey"`
-	Order        int    `json:"order"`
+type createNodeRequest struct {
+	Node    domain.Node    `json:"node"`
+	Default NewNodeDefault `json:"default"`
 }
 
-type reorderRequest struct {
+type moveRequest struct {
+	Key             string `json:"key"`
+	ExpectedVersion int    `json:"expectedVersion"`
+	NewParentKey    string `json:"newParentKey"`
+	Order           int    `json:"order"`
+}
+
+type reorderNodesRequest struct {
 	ParentKey string   `json:"parentKey"`
 	Keys      []string `json:"keys"`
 }
 
-type keyRequest struct {
-	Key     string `json:"key"`
-	Confirm bool   `json:"confirm"`
+type fieldRequest struct {
+	Node            string       `json:"node"`
+	ExpectedVersion int          `json:"expectedVersion"`
+	Field           domain.Field `json:"field"`
 }
 
-type seedRequest struct {
-	Apply bool `json:"apply"`
+type reorderFieldsRequest struct {
+	Node            string   `json:"node"`
+	ExpectedVersion int      `json:"expectedVersion"`
+	Keys            []string `json:"keys"`
+}
+
+type deleteIndustryRequest struct {
+	Key             string `json:"key"`
+	ExpectedVersion int    `json:"expectedVersion"`
 }
 
 type treeResponse struct {
 	RulesVersion int64             `json:"rulesVersion"`
 	Tree         []domain.TreeNode `json:"tree"`
+	// Validations lists the registered validation kinds and the field types
+	// each applies to (for the admin field form).
+	Validations map[string][]domain.FieldType `json:"validations"`
 }
 
 type industriesResponse struct {
@@ -45,8 +63,8 @@ type industriesResponse struct {
 	Items        []domain.Industry `json:"items"`
 }
 
-type defResponse struct {
-	Def domain.AttrDef `json:"def"`
+type nodeResponse struct {
+	Node domain.Node `json:"node"`
 	WriteResult
 }
 
@@ -73,20 +91,18 @@ func (m *Module) RegisterRoutes(appCtx *config.AppContext) {
 			WithLogEnabled()
 	}
 	route("/v1/admin/attributes/tree", m.handleTree, authz.PermAdmin, http.MethodGet, nil)
-	route("/v1/admin/attributes/create", m.handleCreate, authz.PermApprover, http.MethodPost, middleware.DeserializeJson[domain.AttrDef]())
-	route("/v1/admin/attributes/update", m.handleUpdate, authz.PermApprover, http.MethodPost, middleware.DeserializeJson[DefPatch]())
-	route("/v1/admin/attributes/move", m.handleMove, authz.PermApprover, http.MethodPost, middleware.DeserializeJson[moveRequest]())
-	route("/v1/admin/attributes/reorder", m.handleReorder, authz.PermApprover, http.MethodPost, middleware.DeserializeJson[reorderRequest]())
-	route("/v1/admin/attributes/retire", m.handleRetire, authz.PermApprover, http.MethodPost, middleware.DeserializeJson[keyRequest]())
-	route("/v1/admin/attributes/restore", m.handleRestore, authz.PermApprover, http.MethodPost, middleware.DeserializeJson[keyRequest]())
-	// Seed is superuser-only; dry run unless {apply:true}.
-	route("/v1/admin/attributes/seed", m.handleSeed, authz.PermSuperuser, http.MethodPost, middleware.DeserializeJsonOptional[seedRequest]())
+	route("/v1/admin/attributes/nodes/create", m.handleNodeCreate, authz.PermAttributes, http.MethodPost, middleware.DeserializeJson[createNodeRequest]())
+	route("/v1/admin/attributes/nodes/update", m.handleNodeUpdate, authz.PermAttributes, http.MethodPost, middleware.DeserializeJson[NodePatch]())
+	route("/v1/admin/attributes/nodes/move", m.handleNodeMove, authz.PermAttributes, http.MethodPost, middleware.DeserializeJson[moveRequest]())
+	route("/v1/admin/attributes/nodes/reorder", m.handleNodeReorder, authz.PermAttributes, http.MethodPost, middleware.DeserializeJson[reorderNodesRequest]())
+	route("/v1/admin/attributes/fields/create", m.handleFieldCreate, authz.PermAttributes, http.MethodPost, middleware.DeserializeJson[fieldRequest]())
+	route("/v1/admin/attributes/fields/update", m.handleFieldUpdate, authz.PermAttributes, http.MethodPost, middleware.DeserializeJson[fieldRequest]())
+	route("/v1/admin/attributes/fields/reorder", m.handleFieldReorder, authz.PermAttributes, http.MethodPost, middleware.DeserializeJson[reorderFieldsRequest]())
 
 	route("/v1/admin/industries", m.handleIndustries, authz.PermAdmin, http.MethodGet, nil)
-	route("/v1/admin/industries/create", m.handleIndustryCreate, authz.PermApprover, http.MethodPost, middleware.DeserializeJson[domain.Industry]())
-	route("/v1/admin/industries/update", m.handleIndustryUpdate, authz.PermApprover, http.MethodPost, middleware.DeserializeJson[IndustryPatch]())
-	route("/v1/admin/industries/retire", m.handleIndustryRetire, authz.PermApprover, http.MethodPost, middleware.DeserializeJson[keyRequest]())
-	route("/v1/admin/industries/restore", m.handleIndustryRestore, authz.PermApprover, http.MethodPost, middleware.DeserializeJson[keyRequest]())
+	route("/v1/admin/industries/create", m.handleIndustryCreate, authz.PermAttributes, http.MethodPost, middleware.DeserializeJson[domain.Industry]())
+	route("/v1/admin/industries/update", m.handleIndustryUpdate, authz.PermAttributes, http.MethodPost, middleware.DeserializeJson[IndustryPatch]())
+	route("/v1/admin/industries/delete", m.handleIndustryDelete, authz.PermSuperuser, http.MethodPost, middleware.DeserializeJson[deleteIndustryRequest]())
 }
 
 func body[T any](w http.ResponseWriter, r *http.Request) (T, bool) {
@@ -107,11 +123,7 @@ func actorOf(r *http.Request) domain.Actor {
 
 // sendErr maps service errors to HTTP.
 func sendErr(w http.ResponseWriter, r *http.Request, err error) {
-	var (
-		ve *validationError
-		be *retireBlockedError
-		ce *confirmRequiredError
-	)
+	var ve *validationError
 	switch {
 	case errors.As(err, &ve):
 		middleware.SendJSONError(w, r, &apperrors.Error{Code: http.StatusBadRequest, Message: ve.msg, ErrCode: "invalid_rule"})
@@ -121,14 +133,19 @@ func sendErr(w http.ResponseWriter, r *http.Request, err error) {
 		middleware.SendJSONError(w, r, &apperrors.Error{Code: http.StatusConflict, Message: "key already exists", ErrCode: "key_exists"})
 	case errors.Is(err, errVersionConflict):
 		middleware.SendJSONError(w, r, &apperrors.Error{Code: http.StatusConflict, Message: "changed since last read — reload and retry", ErrCode: "version_conflict"})
-	case errors.As(err, &be):
-		middleware.SendJSONError(w, r, &apperrors.Error{Code: http.StatusConflict, Message: "still referenced by rules — edit those first (D-042)", ErrCode: "retire_blocked", Data: be})
-	case errors.As(err, &ce):
-		middleware.SendJSONError(w, r, &apperrors.Error{Code: http.StatusConflict, Message: "this also retires its descendants — resend with confirm:true", ErrCode: "confirm_required", Data: ce})
 	default:
 		middleware.GetLogger(r).Error("attributes write failed", "error", err)
 		middleware.SendJSONError(w, r, apperrors.ErrInternal)
 	}
+}
+
+// sendNode writes a node result (201 on create).
+func sendNode(w http.ResponseWriter, r *http.Request, status int, n domain.Node, res WriteResult, err error) {
+	if err != nil {
+		sendErr(w, r, err)
+		return
+	}
+	middleware.SendJSONResponse(w, r, status, nodeResponse{Node: n, WriteResult: res})
 }
 
 func (m *Module) handleTree(w http.ResponseWriter, r *http.Request) {
@@ -137,54 +154,42 @@ func (m *Module) handleTree(w http.ResponseWriter, r *http.Request) {
 		sendErr(w, r, err)
 		return
 	}
-	middleware.SendJSONResponse(w, r, http.StatusOK, treeResponse{RulesVersion: snap.Version, Tree: snap.Tree()})
+	middleware.SendJSONResponse(w, r, http.StatusOK, treeResponse{RulesVersion: snap.Version, Tree: snap.Tree(), Validations: domain.ValidationKinds()})
 }
 
-func (m *Module) handleCreate(w http.ResponseWriter, r *http.Request) {
-	req, ok := body[domain.AttrDef](w, r)
+func (m *Module) handleNodeCreate(w http.ResponseWriter, r *http.Request) {
+	req, ok := body[createNodeRequest](w, r)
 	if !ok {
 		return
 	}
-	d, res, err := m.svc.CreateDef(r.Context(), actorOf(r), req)
-	if err != nil {
-		sendErr(w, r, err)
-		return
-	}
-	middleware.SendJSONResponse(w, r, http.StatusCreated, defResponse{Def: d, WriteResult: res})
+	n, res, err := m.svc.CreateNode(r.Context(), actorOf(r), req.Node, req.Default)
+	sendNode(w, r, http.StatusCreated, n, res, err)
 }
 
-func (m *Module) handleUpdate(w http.ResponseWriter, r *http.Request) {
-	req, ok := body[DefPatch](w, r)
+func (m *Module) handleNodeUpdate(w http.ResponseWriter, r *http.Request) {
+	req, ok := body[NodePatch](w, r)
 	if !ok {
 		return
 	}
-	d, res, err := m.svc.UpdateDef(r.Context(), actorOf(r), req)
-	if err != nil {
-		sendErr(w, r, err)
-		return
-	}
-	middleware.SendJSONResponse(w, r, http.StatusOK, defResponse{Def: d, WriteResult: res})
+	n, res, err := m.svc.UpdateNode(r.Context(), actorOf(r), req)
+	sendNode(w, r, http.StatusOK, n, res, err)
 }
 
-func (m *Module) handleMove(w http.ResponseWriter, r *http.Request) {
+func (m *Module) handleNodeMove(w http.ResponseWriter, r *http.Request) {
 	req, ok := body[moveRequest](w, r)
 	if !ok {
 		return
 	}
-	d, res, err := m.svc.MoveDef(r.Context(), actorOf(r), req.Key, req.NewParentKey, req.Order)
-	if err != nil {
-		sendErr(w, r, err)
-		return
-	}
-	middleware.SendJSONResponse(w, r, http.StatusOK, defResponse{Def: d, WriteResult: res})
+	n, res, err := m.svc.MoveNode(r.Context(), actorOf(r), req.Key, req.ExpectedVersion, req.NewParentKey, req.Order)
+	sendNode(w, r, http.StatusOK, n, res, err)
 }
 
-func (m *Module) handleReorder(w http.ResponseWriter, r *http.Request) {
-	req, ok := body[reorderRequest](w, r)
+func (m *Module) handleNodeReorder(w http.ResponseWriter, r *http.Request) {
+	req, ok := body[reorderNodesRequest](w, r)
 	if !ok {
 		return
 	}
-	res, err := m.svc.Reorder(r.Context(), actorOf(r), req.ParentKey, req.Keys)
+	res, err := m.svc.ReorderNodes(r.Context(), actorOf(r), req.ParentKey, req.Keys)
 	if err != nil {
 		sendErr(w, r, err)
 		return
@@ -192,40 +197,31 @@ func (m *Module) handleReorder(w http.ResponseWriter, r *http.Request) {
 	middleware.SendJSONResponse(w, r, http.StatusOK, res)
 }
 
-func (m *Module) handleRetire(w http.ResponseWriter, r *http.Request) {
-	req, ok := body[keyRequest](w, r)
+func (m *Module) handleFieldCreate(w http.ResponseWriter, r *http.Request) {
+	req, ok := body[fieldRequest](w, r)
 	if !ok {
 		return
 	}
-	res, err := m.svc.RetireDef(r.Context(), actorOf(r), req.Key, req.Confirm)
-	if err != nil {
-		sendErr(w, r, err)
-		return
-	}
-	middleware.SendJSONResponse(w, r, http.StatusOK, res)
+	n, res, err := m.svc.CreateField(r.Context(), actorOf(r), req.Node, req.ExpectedVersion, req.Field)
+	sendNode(w, r, http.StatusCreated, n, res, err)
 }
 
-func (m *Module) handleRestore(w http.ResponseWriter, r *http.Request) {
-	req, ok := body[keyRequest](w, r)
+func (m *Module) handleFieldUpdate(w http.ResponseWriter, r *http.Request) {
+	req, ok := body[fieldRequest](w, r)
 	if !ok {
 		return
 	}
-	d, res, err := m.svc.RestoreDef(r.Context(), actorOf(r), req.Key)
-	if err != nil {
-		sendErr(w, r, err)
-		return
-	}
-	middleware.SendJSONResponse(w, r, http.StatusOK, defResponse{Def: d, WriteResult: res})
+	n, res, err := m.svc.UpdateField(r.Context(), actorOf(r), req.Node, req.ExpectedVersion, req.Field)
+	sendNode(w, r, http.StatusOK, n, res, err)
 }
 
-func (m *Module) handleSeed(w http.ResponseWriter, r *http.Request) {
-	req, _ := r.Context().Value(middleware.DeserializerContextKey).(seedRequest)
-	rep, err := m.svc.Seed(r.Context(), actorOf(r), req.Apply)
-	if err != nil {
-		sendErr(w, r, err)
+func (m *Module) handleFieldReorder(w http.ResponseWriter, r *http.Request) {
+	req, ok := body[reorderFieldsRequest](w, r)
+	if !ok {
 		return
 	}
-	middleware.SendJSONResponse(w, r, http.StatusOK, rep)
+	n, res, err := m.svc.ReorderFields(r.Context(), actorOf(r), req.Node, req.ExpectedVersion, req.Keys)
+	sendNode(w, r, http.StatusOK, n, res, err)
 }
 
 func (m *Module) handleIndustries(w http.ResponseWriter, r *http.Request) {
@@ -263,23 +259,15 @@ func (m *Module) handleIndustryUpdate(w http.ResponseWriter, r *http.Request) {
 	middleware.SendJSONResponse(w, r, http.StatusOK, industryResponse{Industry: ind, WriteResult: res})
 }
 
-func (m *Module) handleIndustryRetire(w http.ResponseWriter, r *http.Request) {
-	m.setIndustryRetired(w, r, true)
-}
-
-func (m *Module) handleIndustryRestore(w http.ResponseWriter, r *http.Request) {
-	m.setIndustryRetired(w, r, false)
-}
-
-func (m *Module) setIndustryRetired(w http.ResponseWriter, r *http.Request, retired bool) {
-	req, ok := body[keyRequest](w, r)
+func (m *Module) handleIndustryDelete(w http.ResponseWriter, r *http.Request) {
+	req, ok := body[deleteIndustryRequest](w, r)
 	if !ok {
 		return
 	}
-	ind, res, err := m.svc.SetIndustryRetired(r.Context(), actorOf(r), req.Key, retired)
+	res, err := m.svc.DeleteIndustry(r.Context(), actorOf(r), req.Key, req.ExpectedVersion)
 	if err != nil {
 		sendErr(w, r, err)
 		return
 	}
-	middleware.SendJSONResponse(w, r, http.StatusOK, industryResponse{Industry: ind, WriteResult: res})
+	middleware.SendJSONResponse(w, r, http.StatusOK, res)
 }

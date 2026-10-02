@@ -5,95 +5,96 @@ import (
 	"slices"
 )
 
-// Cmp is a condition comparator.
+// Cmp is a condition comparator (D-141).
 type Cmp string
 
 const (
-	CmpEq          Cmp = "eq"           // bool, number, pick
-	CmpGte         Cmp = "gte"          // number, calculated, range (max reaches ≥ value)
-	CmpLte         Cmp = "lte"          // number, calculated, range (min reaches ≤ value)
-	CmpIn          Cmp = "in"           // pick: value is one of; multi: any overlap
+	CmpIsYes       Cmp = "is_yes"       // node state (no field)
+	CmpEq          Cmp = "eq"           // bool, number, area, ratio, pick
+	CmpGte         Cmp = "gte"          // number, area, ratio; range: max ≥ value ("can reach")
+	CmpLte         Cmp = "lte"          // number, area, ratio; range: min ≤ value
+	CmpIn          Cmp = "in"           // pick: one of; multi: any overlap
 	CmpContains    Cmp = "contains"     // multi: holds the value
-	CmpContainsAll Cmp = "contains_all" // multi: holds every value (Pharma zone segregation)
+	CmpContainsAll Cmp = "contains_all" // multi: holds every value
 )
 
-// Condition is one rule on one attribute: `{attr, cmp, value}`. Used by
-// industry rules and appliesWhen.
+// Condition is one industry rule: `node is_yes` or `node.field <cmp> value`.
+// Numeric values are in the field's canonical unit (sq m for area).
 type Condition struct {
-	Attr  string `bson:"attr"  json:"attr"`
-	Cmp   Cmp    `bson:"cmp"   json:"cmp"`
-	Value any    `bson:"value" json:"value"`
+	Node  string `bson:"node"            json:"node"`
+	Field string `bson:"field,omitempty" json:"field,omitempty"`
+	Cmp   Cmp    `bson:"cmp"             json:"cmp"`
+	Value any    `bson:"value,omitempty" json:"value,omitempty"`
 }
 
-// CondOp combines a CondNode's conditions.
-type CondOp string
-
-const (
-	OpAny CondOp = "any"
-	OpAll CondOp = "all"
-)
-
-// CondNode is a one-level any/all over conditions (D-032). Stored as a node
-// so `{op, conds: [Condition | CondNode]}` nesting later is a superset.
-type CondNode struct {
-	Op    CondOp      `bson:"op"    json:"op"`
-	Conds []Condition `bson:"conds" json:"conds"`
+// Path is the condition's target: "<node>" or "<node>.<field>".
+func (c Condition) Path() string {
+	if c.Field == "" {
+		return c.Node
+	}
+	return c.Node + "." + c.Field
 }
 
 // MaxConds bounds one rule list.
 const MaxConds = 20
 
 // NormalizeCondition validates c against the tree and returns it with Value
-// coerced to its canonical Go type (bool | float64 | string | []string). The
-// referenced attribute must exist, be a non-retired attribute, and accept the
-// comparator. Number values are canonical units.
+// coerced to its canonical Go type (nil | bool | float64 | string | []string).
 func NormalizeCondition(s *Snapshot, c Condition) (Condition, error) {
-	d, ok := s.Def(c.Attr)
+	n, ok := s.Node(c.Node)
 	if !ok {
-		return c, fmt.Errorf("condition references unknown attribute %q", c.Attr)
+		return c, fmt.Errorf("condition references unknown node %q", c.Node)
 	}
-	if d.IsGroup() {
-		return c, fmt.Errorf("condition references group %q", c.Attr)
+	if c.Cmp == CmpIsYes {
+		if c.Field != "" {
+			return c, fmt.Errorf("condition %q: is_yes takes no field", c.Path())
+		}
+		c.Value = nil
+		return c, nil
 	}
-	if d.Retired {
-		return c, fmt.Errorf("condition references retired attribute %q", c.Attr)
+	if c.Field == "" {
+		return c, fmt.Errorf("condition on %q: %q needs a field", c.Node, c.Cmp)
+	}
+	f, ok := n.Field(c.Field)
+	if !ok {
+		return c, fmt.Errorf("condition references unknown field %q", c.Path())
 	}
 	bad := func() (Condition, error) {
-		return c, fmt.Errorf("condition on %q: comparator %q with value %v is not valid for type %s", c.Attr, c.Cmp, c.Value, d.Type)
+		return c, fmt.Errorf("condition on %q: comparator %q with value %v is not valid for a %s field", c.Path(), c.Cmp, c.Value, f.Type)
 	}
-	switch d.Type {
+	switch f.Type {
 	case TypeBool:
 		b, ok := asBool(c.Value)
 		if c.Cmp != CmpEq || !ok {
 			return bad()
 		}
 		c.Value = b
-	case TypeNumber, TypeCalculated:
-		f, ok := asFloat(c.Value)
+	case TypeNumber, TypeArea, TypeRatio:
+		v, ok := asFloat(c.Value)
 		if !ok || (c.Cmp != CmpEq && c.Cmp != CmpGte && c.Cmp != CmpLte) {
 			return bad()
 		}
-		c.Value = f
+		c.Value = v
 	case TypeRange:
-		f, ok := asFloat(c.Value)
+		v, ok := asFloat(c.Value)
 		if !ok || (c.Cmp != CmpGte && c.Cmp != CmpLte) {
 			return bad()
 		}
-		c.Value = f
+		c.Value = v
 	case TypePick:
 		switch c.Cmp {
 		case CmpEq:
 			v, ok := asString(c.Value)
-			if !ok || !d.HasAllowedValue(v) {
+			if !ok || !f.HasOption(v) {
 				return bad()
 			}
 			c.Value = v
 		case CmpIn:
 			vs, ok := asStrings(c.Value)
-			if !ok || !validOptions(d, vs) {
+			if !ok || !validOptions(f, vs) {
 				return bad()
 			}
-			c.Value = vs
+			c.Value = dedupe(vs)
 		default:
 			return bad()
 		}
@@ -101,31 +102,31 @@ func NormalizeCondition(s *Snapshot, c Condition) (Condition, error) {
 		switch c.Cmp {
 		case CmpContains:
 			v, ok := asString(c.Value)
-			if !ok || !d.HasAllowedValue(v) {
+			if !ok || !f.HasOption(v) {
 				return bad()
 			}
 			c.Value = v
 		case CmpContainsAll, CmpIn:
 			vs, ok := asStrings(c.Value)
-			if !ok || !validOptions(d, vs) {
+			if !ok || !validOptions(f, vs) {
 				return bad()
 			}
-			c.Value = vs
+			c.Value = dedupe(vs)
 		default:
 			return bad()
 		}
-	default: // text, money: not rule material
+	default: // text, longtext, money, date, address, location: not rule material
 		return bad()
 	}
 	return c, nil
 }
 
-func validOptions(d *AttrDef, vs []string) bool {
+func validOptions(f *Field, vs []string) bool {
 	if len(vs) == 0 {
 		return false
 	}
 	for _, v := range vs {
-		if !d.HasAllowedValue(v) {
+		if !f.HasOption(v) {
 			return false
 		}
 	}
@@ -148,17 +149,39 @@ func NormalizeConditions(s *Snapshot, conds []Condition) ([]Condition, error) {
 	return out, nil
 }
 
-// compare evaluates a known answer value against c. A value of the wrong
-// shape is "not met" (F): it can only come from a corrupted doc, and failing
-// closed keeps a bad row out of fit results.
-func compare(t AttrType, v any, c Condition) bool {
+// References reports whether any of ind's rules names node (field == "") or
+// node.field (option == "") or uses option in its value.
+func (ind *Industry) References(node, field, option string) bool {
+	for _, set := range [][]Condition{ind.Required, ind.Preferred} {
+		for _, c := range set {
+			if c.Node != node || (field != "" && c.Field != field) {
+				continue
+			}
+			if option == "" {
+				return true
+			}
+			if v, ok := asString(c.Value); ok && v == option {
+				return true
+			}
+			if vs, ok := asStrings(c.Value); ok && slices.Contains(vs, option) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// compare evaluates a present canonical value against c. A value of the
+// wrong shape is "not met": it can only come from a corrupted doc, and
+// failing closed keeps a bad row out of fit results.
+func compare(t FieldType, v any, c Condition) bool {
 	switch t {
 	case TypeBool:
 		a, ok1 := asBool(v)
 		b, ok2 := asBool(c.Value)
 		return ok1 && ok2 && a == b
-	case TypeNumber, TypeCalculated:
-		a, ok1 := asFloat(v)
+	case TypeNumber, TypeArea, TypeRatio:
+		a, ok1 := numberOf(t, v)
 		b, ok2 := asFloat(c.Value)
 		if !ok1 || !ok2 {
 			return false
@@ -230,4 +253,14 @@ func compare(t AttrType, v any, c Condition) bool {
 		}
 	}
 	return false
+}
+
+// numberOf reads the comparable number of a numeric field's value: canonical
+// number, area in sq m, ratio as computed.
+func numberOf(t FieldType, v any) (float64, bool) {
+	if t == TypeArea {
+		a, ok := asArea(v)
+		return a.Sqm, ok
+	}
+	return asFloat(v)
 }

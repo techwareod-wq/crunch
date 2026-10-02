@@ -68,8 +68,8 @@ var (
 // Admin access management
 var (
 	// ErrInvalidAccess: role must be user or admin; permissions any of
-	// editor/approver, and none for role user.
-	ErrInvalidAccess = &Error{Code: http.StatusBadRequest, Message: "role must be user or admin; permissions any of editor, approver (none for user)", ErrCode: "invalid_access"}
+	// editor/approver/attributes, and none for role user.
+	ErrInvalidAccess = &Error{Code: http.StatusBadRequest, Message: "role must be user or admin; permissions any of editor, approver, attributes (none for user)", ErrCode: "invalid_access"}
 	// ErrAccessConflict (409): the target's access changed since it was read.
 	ErrAccessConflict = &Error{Code: http.StatusConflict, Message: "access changed since last read — refetch and retry", ErrCode: "access_conflict"}
 	// ErrSuperuserImmutable (403): superuser accounts are managed only by

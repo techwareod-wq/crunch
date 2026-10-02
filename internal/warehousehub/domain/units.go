@@ -104,5 +104,21 @@ func ToCanonical(d Dimension, v float64, unit string) (float64, error) {
 	return conv(v), nil
 }
 
-// SqftFromSqm converts canonical area back to sq ft (dock ratio, D-041).
-func SqftFromSqm(sqm float64) float64 { return sqm / SqmPerSqft }
+// FromCanonical converts a canonical value of d into unit (the inverse of
+// ToCanonical). Every conversion in the table is linear, so the inverse is
+// read off two points.
+func FromCanonical(d Dimension, v float64, unit string) (float64, error) {
+	t, ok := unitTable[d]
+	if !ok {
+		return 0, fmt.Errorf("unknown dimension %q", d)
+	}
+	if unit == "" {
+		unit = t.canonical
+	}
+	conv, ok := t.toCanon[strings.TrimSpace(unit)]
+	if !ok {
+		return 0, fmt.Errorf("unit %q not accepted for %s", unit, d)
+	}
+	offset, slope := conv(0), conv(1)-conv(0)
+	return (v - offset) / slope, nil
+}

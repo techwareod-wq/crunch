@@ -134,7 +134,7 @@ func (r *recomputer) batch(ctx context.Context, p RecomputeBatchPayload) error {
 		if d.Live == nil {
 			continue
 		}
-		out[d.ID] = domain.Evaluate(snap, d.EvalInput(), now).Projection
+		out[d.ID] = domain.Evaluate(snap, d.Live.Attributes, now).Projection
 	}
 	n, err := r.warehouses.WriteProjections(ctx, out)
 	if err != nil {

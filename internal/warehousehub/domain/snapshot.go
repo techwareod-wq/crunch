@@ -3,78 +3,86 @@ package domain
 import (
 	"context"
 	"sort"
+	"strings"
 )
 
 // Snapshot is an immutable view of the attribute tree plus the industries at
 // one rulesVersion. Built once per reload and shared read-only; never mutate
-// a snapshot or the slices it returns.
+// a snapshot or the slices it returns (Clone a node before editing it).
 type Snapshot struct {
 	// Version is the rulesVersion the snapshot was loaded at.
 	Version int64
-	// Defs is every node (retired included) in tree order: depth-first,
-	// siblings by (order, key).
-	Defs []AttrDef
-	// Industries is every industry (retired included) by (order, key).
+	// Nodes is every node in tree order: depth-first from the root, siblings
+	// by (order, key); each node's fields sorted by (order, key). Nodes not
+	// reachable from the root (a damaged tree) come last.
+	Nodes []Node
+	// Industries is every industry by (order, key).
 	Industries []Industry
 
-	byKey    map[string]*AttrDef
-	children map[string][]string // parentKey ("" = root) → child keys in order
+	byKey    map[string]*Node
+	children map[string][]string // parentKey → child keys in order
 }
 
-// NewSnapshot builds a snapshot from raw docs. Nodes whose parent is missing
-// are treated as roots so a damaged tree still evaluates.
-func NewSnapshot(version int64, defs []AttrDef, industries []Industry) *Snapshot {
+// NewSnapshot builds a snapshot from raw docs.
+func NewSnapshot(version int64, nodes []Node, industries []Industry) *Snapshot {
 	s := &Snapshot{
 		Version:  version,
-		byKey:    make(map[string]*AttrDef, len(defs)),
+		byKey:    make(map[string]*Node, len(nodes)),
 		children: map[string][]string{},
 	}
-	raw := make(map[string]AttrDef, len(defs))
-	for _, d := range defs {
-		raw[d.Key] = d
+	raw := make(map[string]Node, len(nodes))
+	sorted := make([]Node, 0, len(nodes))
+	for _, n := range nodes {
+		n = n.Clone()
+		sort.SliceStable(n.Fields, func(i, j int) bool {
+			if n.Fields[i].Order != n.Fields[j].Order {
+				return n.Fields[i].Order < n.Fields[j].Order
+			}
+			return n.Fields[i].Key < n.Fields[j].Key
+		})
+		raw[n.Key] = n
+		sorted = append(sorted, n)
 	}
-	sorted := make([]AttrDef, len(defs))
-	copy(sorted, defs)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		if sorted[i].Order != sorted[j].Order {
 			return sorted[i].Order < sorted[j].Order
 		}
 		return sorted[i].Key < sorted[j].Key
 	})
-	for _, d := range sorted {
-		p := d.ParentKey
-		if _, ok := raw[p]; !ok || p == d.Key {
-			p = ""
+	for _, n := range sorted {
+		if n.ParentKey != "" {
+			s.children[n.ParentKey] = append(s.children[n.ParentKey], n.Key)
 		}
-		s.children[p] = append(s.children[p], d.Key)
 	}
 
-	seen := make(map[string]bool, len(defs))
+	seen := make(map[string]bool, len(nodes))
 	var walk func(key string)
 	walk = func(key string) {
 		if seen[key] {
 			return
 		}
 		seen[key] = true
-		s.Defs = append(s.Defs, raw[key])
+		s.Nodes = append(s.Nodes, raw[key])
 		for _, c := range s.children[key] {
 			walk(c)
 		}
 	}
-	for _, k := range s.children[""] {
-		walk(k)
+	if _, ok := raw[RootKey]; ok {
+		walk(RootKey)
 	}
-	// Cycle members are unreachable from the roots; keep them so nothing
-	// silently disappears.
-	for _, d := range sorted {
-		walk(d.Key)
+	// Orphans and cycle members are unreachable; keep them so nothing
+	// silently disappears (the evaluator treats them as "no").
+	for _, n := range sorted {
+		walk(n.Key)
 	}
-	for i := range s.Defs {
-		s.byKey[s.Defs[i].Key] = &s.Defs[i]
+	for i := range s.Nodes {
+		s.byKey[s.Nodes[i].Key] = &s.Nodes[i]
 	}
 
 	s.Industries = make([]Industry, len(industries))
-	copy(s.Industries, industries)
+	for i, ind := range industries {
+		s.Industries[i] = ind.Clone()
+	}
 	sort.SliceStable(s.Industries, func(i, j int) bool {
 		if s.Industries[i].Order != s.Industries[j].Order {
 			return s.Industries[i].Order < s.Industries[j].Order
@@ -84,16 +92,33 @@ func NewSnapshot(version int64, defs []AttrDef, industries []Industry) *Snapshot
 	return s
 }
 
-// EmptySnapshot is the snapshot before anything is seeded.
+// EmptySnapshot is the snapshot before the first load.
 func EmptySnapshot() *Snapshot { return NewSnapshot(0, nil, nil) }
 
-// Def looks up a node by key.
-func (s *Snapshot) Def(key string) (*AttrDef, bool) {
-	d, ok := s.byKey[key]
-	return d, ok
+// Node looks up a node by key.
+func (s *Snapshot) Node(key string) (*Node, bool) {
+	n, ok := s.byKey[key]
+	return n, ok
 }
 
-// Children returns parentKey's child keys in order ("" = roots).
+// Field resolves a full field path "<node>.<field>".
+func (s *Snapshot) Field(path string) (*Node, *Field, bool) {
+	nk, fk, ok := strings.Cut(path, ".")
+	if !ok {
+		return nil, nil, false
+	}
+	n, ok := s.byKey[nk]
+	if !ok {
+		return nil, nil, false
+	}
+	f, ok := n.Field(fk)
+	if !ok {
+		return nil, nil, false
+	}
+	return n, f, true
+}
+
+// Children returns parentKey's child keys in order.
 func (s *Snapshot) Children(parentKey string) []string {
 	return s.children[parentKey]
 }
@@ -120,9 +145,9 @@ func (s *Snapshot) Descendants(key string) []string {
 // IsAncestor reports whether anc is a strict ancestor of key.
 func (s *Snapshot) IsAncestor(anc, key string) bool {
 	seen := map[string]bool{}
-	for d, ok := s.Def(key); ok && d.ParentKey != "" && !seen[d.Key]; d, ok = s.Def(d.ParentKey) {
-		seen[d.Key] = true
-		if d.ParentKey == anc {
+	for n, ok := s.Node(key); ok && n.ParentKey != "" && !seen[n.Key]; n, ok = s.Node(n.ParentKey) {
+		seen[n.Key] = true
+		if n.ParentKey == anc {
 			return true
 		}
 	}
@@ -141,22 +166,24 @@ func (s *Snapshot) Industry(key string) (*Industry, bool) {
 
 // TreeNode is one node of the nested admin tree view.
 type TreeNode struct {
-	AttrDef
+	Node
 	Children []TreeNode `json:"children"`
 }
 
-// Tree returns the nested tree (retired nodes included, flagged).
+// Tree returns the nested tree from the root (empty before the bootstrap).
 func (s *Snapshot) Tree() []TreeNode {
-	var build func(parent string) []TreeNode
-	build = func(parent string) []TreeNode {
-		out := []TreeNode{}
-		for _, k := range s.children[parent] {
-			d := s.byKey[k]
-			out = append(out, TreeNode{AttrDef: *d, Children: build(k)})
+	var build func(key string) TreeNode
+	build = func(key string) TreeNode {
+		t := TreeNode{Node: *s.byKey[key], Children: []TreeNode{}}
+		for _, c := range s.children[key] {
+			t.Children = append(t.Children, build(c))
 		}
-		return out
+		return t
 	}
-	return build("")
+	if _, ok := s.byKey[RootKey]; !ok {
+		return []TreeNode{}
+	}
+	return []TreeNode{build(RootKey)}
 }
 
 // Rules gives other modules the current attribute snapshot (implemented by

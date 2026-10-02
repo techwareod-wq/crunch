@@ -1,10 +1,8 @@
 package domain
 
-import (
-	"time"
-)
+import "time"
 
-// Tri is three-valued logic for conditions and applicability.
+// Tri is three-valued logic for conditions.
 type Tri int8
 
 const (
@@ -13,60 +11,6 @@ const (
 	TriTrue    Tri = 1
 )
 
-func and3(ts ...Tri) Tri {
-	out := TriTrue
-	for _, t := range ts {
-		if t == TriFalse {
-			return TriFalse
-		}
-		if t == TriUnknown {
-			out = TriUnknown
-		}
-	}
-	return out
-}
-
-func or3(ts ...Tri) Tri {
-	out := TriFalse
-	for _, t := range ts {
-		if t == TriTrue {
-			return TriTrue
-		}
-		if t == TriUnknown {
-			out = TriUnknown
-		}
-	}
-	return out
-}
-
-// EvalInput is what the evaluator reads from a warehouse's content.
-type EvalInput struct {
-	Attributes map[string]Answer
-	// TotalAreaSqm is the fixed total-area field; 0 means unknown.
-	TotalAreaSqm float64
-}
-
-// CalcFn fills a calculated attribute. ok=false means the result is unknown.
-type CalcFn func(answers map[string]Answer, in EvalInput) (v float64, ok bool)
-
-// CalcFns is the calculated-attribute registry (D-041), keyed by CalcSpec.Fn.
-var CalcFns = map[string]CalcFn{
-	"dock_ratio": dockRatio,
-}
-
-// dockRatio = dock doors per 10,000 sq ft of TOTAL area (D-041).
-func dockRatio(answers map[string]Answer, in EvalInput) (float64, bool) {
-	a, ok := answers["dock_doors"]
-	if !ok || a.Status != StatusKnown {
-		return 0, false
-	}
-	doors, ok := asFloat(a.V)
-	if !ok || in.TotalAreaSqm <= 0 {
-		return 0, false
-	}
-	return doors / (SqftFromSqm(in.TotalAreaSqm) / 10000), true
-}
-
 // NumFact is one known number in the search projection.
 type NumFact struct {
 	K string  `bson:"k" json:"k"`
@@ -74,20 +18,26 @@ type NumFact struct {
 }
 
 // Projection is the search projection written onto the live `warehouses`
-// doc (spec 02 §6) and read by search (04). Slices are never nil so the
-// stored arrays are always present.
+// doc (spec 02 Evaluator §6) and read by search (04). Only public +
+// filterable nodes/fields (on a public node) enter Chips/Unk/Nums. Slices are
+// never nil so the stored arrays are always present.
 type Projection struct {
-	// Chips: "<key>:yes" for a known true bool, "<key>:<value>" for a pick
-	// value and for each multi value. Filterable + public attributes only.
+	// Chips: "<node>" for a yes node (never the root), "<node>.<field>" for
+	// a true bool, "<node>.<field>:<option>" for a pick value and for each
+	// multi value.
 	Chips []string `bson:"chips" json:"chips"`
-	// Unk: filterable + public attributes that may apply (applicability true
-	// or unknown) and have no known answer — the "include unverified" set.
+	// Unk is the "include unverified" set: unknown nodes, plus required
+	// fields missing on a yes node (D-127) and ratios that can't be computed.
+	// A field filter treats its value as unknown when either the field path
+	// or its node key is listed.
 	Unk []string `bson:"unk" json:"unk"`
-	// Nums: known numbers in canonical units; ranges emit <key>_min/<key>_max.
+	// Nums: canonical numbers (area in sq m); ranges emit <path>_min and
+	// <path>_max.
 	Nums []NumFact `bson:"nums" json:"nums"`
-	// Fit: "<industry>:<F|P|U|N>" per non-retired industry.
+	// Fit: "<industry>:<F|P|U|N>" per industry.
 	Fit []string `bson:"fit" json:"fit"`
-	// NeedsInfo: applicable, answerable attributes with no answer (D-039).
+	// NeedsInfo: unknown nodes, then missing required field paths (D-039,
+	// D-139). Never null optional fields.
 	NeedsInfo       []string  `bson:"needs_info"        json:"needsInfo"`
 	NeedsInfoCount  int       `bson:"needs_info_count"  json:"needsInfoCount"`
 	FitRulesVersion int64     `bson:"fit_rules_version" json:"fitRulesVersion"`
@@ -96,52 +46,45 @@ type Projection struct {
 
 // Result is the full evaluation of one warehouse.
 type Result struct {
-	// Calc holds the known calculated values.
-	Calc map[string]float64 `json:"calc"`
-	// Applicable is the applicability of every attribute (groups excluded).
-	Applicable map[string]Tri `json:"-"`
-	// NeedsInfo lists, in tree order, the keys to ask about.
+	// State is every node's effective state.
+	State map[string]NodeStatus `json:"state"`
+	// Ratios holds the computable ratio values by field path.
+	Ratios map[string]float64 `json:"ratios"`
+	// UnknownNodes and MissingRequired, in tree order.
+	UnknownNodes    []string `json:"unknownNodes"`
+	MissingRequired []string `json:"missingRequired"`
+	// NeedsInfo = UnknownNodes + MissingRequired.
 	NeedsInfo []string `json:"needsInfo"`
-	// Fit is the verdict per non-retired industry.
+	// Fit is the verdict per industry.
 	Fit        map[string]Verdict `json:"fit"`
 	Projection Projection         `json:"-"`
 }
 
-// IsApplicable reports whether key definitely applies.
-func (r *Result) IsApplicable(key string) bool { return r.Applicable[key] == TriTrue }
-
 // Evaluate runs the attribute engine over one warehouse (spec 02 Evaluator).
-// Pure: no IO, deterministic for (snapshot, input, now).
-func Evaluate(s *Snapshot, in EvalInput, now time.Time) Result {
-	e := &evaluator{
-		s:        s,
-		answers:  make(map[string]Answer, len(in.Attributes)+2),
-		app:      map[string]Tri{},
-		visiting: map[string]bool{},
-	}
-	for k, a := range in.Attributes {
-		e.answers[k] = a
-	}
+// Pure: no IO, deterministic for (snapshot, attributes, now).
+func Evaluate(s *Snapshot, a Attributes, now time.Time) Result {
+	e := &evaluator{s: s, a: a, eff: effectiveStates(s, a), ratios: map[string]float64{}}
 	res := Result{
-		Calc:       map[string]float64{},
-		Applicable: map[string]Tri{},
-		NeedsInfo:  []string{},
-		Fit:        map[string]Verdict{},
+		State:           e.eff,
+		Ratios:          e.ratios,
+		UnknownNodes:    []string{},
+		MissingRequired: []string{},
+		Fit:             map[string]Verdict{},
 	}
 
-	// 1. Calculated values overwrite anything stored under their key.
-	for _, d := range s.Defs {
-		if d.Type != TypeCalculated || d.Retired || d.Calc == nil {
+	// 2. Ratios on yes nodes (D-134).
+	for i := range s.Nodes {
+		n := &s.Nodes[i]
+		if e.eff[n.Key] != StatusYes {
 			continue
 		}
-		delete(e.answers, d.Key)
-		fn, ok := CalcFns[d.Calc.Fn]
-		if !ok {
-			continue
-		}
-		if v, ok := fn(in.Attributes, in); ok {
-			res.Calc[d.Key] = v
-			e.answers[d.Key] = Answer{Status: StatusKnown, V: v}
+		for j := range n.Fields {
+			f := &n.Fields[j]
+			if f.Type == TypeRatio && f.Ratio != nil {
+				if v, ok := e.ratio(f.Ratio); ok {
+					e.ratios[n.Key+"."+f.Key] = v
+				}
+			}
 		}
 	}
 
@@ -150,39 +93,44 @@ func Evaluate(s *Snapshot, in EvalInput, now time.Time) Result {
 		FitRulesVersion: s.Version, EvaluatedAt: now,
 	}
 
-	// 2–3. Applicability, needsInfo and the chip/num projection, in tree order.
-	for i := range s.Defs {
-		d := &s.Defs[i]
-		if d.IsGroup() {
-			continue
-		}
-		app := e.applicable(d.Key)
-		res.Applicable[d.Key] = app
-		a, has := e.answers[d.Key]
-		known := has && a.Status == StatusKnown
-		unanswered := !has || a.Status == StatusUnknown || a.Status == ""
-
-		if app == TriTrue && unanswered && d.Type != TypeCalculated && !d.Retired {
-			res.NeedsInfo = append(res.NeedsInfo, d.Key)
-		}
-		if !d.Filterable || !d.Public || d.Retired || app == TriFalse {
-			continue
-		}
-		if app == TriUnknown || unanswered {
-			proj.Unk = append(proj.Unk, d.Key)
-			continue
-		}
-		if known {
-			proj.Chips, proj.Nums = project(d, a.V, proj.Chips, proj.Nums)
+	// 3 + 6. Needs-info and the chip/num projection, in tree order.
+	for i := range s.Nodes {
+		n := &s.Nodes[i]
+		switch e.eff[n.Key] {
+		case StatusUnknown:
+			res.UnknownNodes = append(res.UnknownNodes, n.Key)
+			if nodeSearchable(n) {
+				proj.Unk = append(proj.Unk, n.Key)
+			}
+		case StatusYes:
+			if n.Key != RootKey && n.Public && n.Filterable {
+				proj.Chips = append(proj.Chips, n.Key)
+			}
+			for j := range n.Fields {
+				f := &n.Fields[j]
+				path := n.Key + "." + f.Key
+				v, present := e.value(n.Key, f)
+				missing := !present && (f.Required || f.Type == TypeRatio)
+				if missing && f.Required {
+					res.MissingRequired = append(res.MissingRequired, path)
+				}
+				if !n.Public || !f.Public || !f.Filterable {
+					continue
+				}
+				switch {
+				case present:
+					proj.Chips, proj.Nums = project(f, path, v, proj.Chips, proj.Nums)
+				case missing:
+					proj.Unk = append(proj.Unk, path)
+				}
+			}
 		}
 	}
+	res.NeedsInfo = append(append([]string{}, res.UnknownNodes...), res.MissingRequired...)
 
 	// 5. Verdicts.
 	for i := range s.Industries {
 		ind := &s.Industries[i]
-		if ind.Retired {
-			continue
-		}
 		v := e.verdict(ind)
 		res.Fit[ind.Key] = v
 		proj.Fit = append(proj.Fit, ind.Key+":"+string(v))
@@ -194,148 +142,136 @@ func Evaluate(s *Snapshot, in EvalInput, now time.Time) Result {
 	return res
 }
 
-// project appends a known answer's chips / numeric facts.
-func project(d *AttrDef, v any, chips []string, nums []NumFact) ([]string, []NumFact) {
-	switch d.Type {
+// nodeSearchable: the node itself is a chip, or one of its fields is.
+func nodeSearchable(n *Node) bool {
+	if !n.Public {
+		return false
+	}
+	if n.Filterable {
+		return true
+	}
+	for i := range n.Fields {
+		if n.Fields[i].Public && n.Fields[i].Filterable {
+			return true
+		}
+	}
+	return false
+}
+
+// project appends a present value's chips / numeric facts.
+func project(f *Field, path string, v any, chips []string, nums []NumFact) ([]string, []NumFact) {
+	switch f.Type {
 	case TypeBool:
 		if b, ok := asBool(v); ok && b {
-			chips = append(chips, d.Key+":yes")
+			chips = append(chips, path)
 		}
 	case TypePick:
 		if s, ok := asString(v); ok && s != "" {
-			chips = append(chips, d.Key+":"+s)
+			chips = append(chips, path+":"+s)
 		}
 	case TypeMulti:
 		if ss, ok := asStrings(v); ok {
 			for _, s := range ss {
-				chips = append(chips, d.Key+":"+s)
+				chips = append(chips, path+":"+s)
 			}
 		}
-	case TypeNumber, TypeCalculated:
-		if f, ok := asFloat(v); ok {
-			nums = append(nums, NumFact{K: d.Key, V: f})
+	case TypeNumber, TypeArea, TypeRatio:
+		if x, ok := numberOf(f.Type, v); ok {
+			nums = append(nums, NumFact{K: path, V: x})
 		}
 	case TypeRange:
 		if r, ok := asRange(v); ok {
-			nums = append(nums, NumFact{K: d.Key + "_min", V: r.Min}, NumFact{K: d.Key + "_max", V: r.Max})
+			nums = append(nums, NumFact{K: path + "_min", V: r.Min}, NumFact{K: path + "_max", V: r.Max})
 		}
 	}
 	return chips, nums
 }
 
 type evaluator struct {
-	s        *Snapshot
-	answers  map[string]Answer // stored answers + calculated values
-	app      map[string]Tri
-	visiting map[string]bool
+	s      *Snapshot
+	a      Attributes
+	eff    map[string]NodeStatus
+	ratios map[string]float64
 }
 
-// applicable: not retired AND parent-rule AND/OR appliesWhen (spec 02 §2,
-// D-032). An attribute parent contributes "parent applies and is truthy";
-// appliesWhen op "all" ANDs its conditions in, op "any" ORs them in (so
-// temperature tracking = cold storage OR GDP). A group parent only passes on
-// its own applicability and always ANDs.
-func (e *evaluator) applicable(key string) Tri {
-	if t, ok := e.app[key]; ok {
-		return t
+// value returns node.field's value: the computed ratio, or the stored value
+// (nil/absent = not present).
+func (e *evaluator) value(node string, f *Field) (any, bool) {
+	if f.Type == TypeRatio {
+		v, ok := e.ratios[node+"."+f.Key]
+		return v, ok
 	}
-	d, ok := e.s.Def(key)
-	if !ok || d.Retired {
-		return TriFalse
+	fv := e.a.Value(node, f.Key)
+	if fv == nil || fv.V == nil {
+		return nil, false
 	}
-	if e.visiting[key] { // dependency cycle: refuse to decide
-		return TriUnknown
-	}
-	e.visiting[key] = true
-	defer delete(e.visiting, key)
-
-	var parentTri Tri = TriTrue
-	parentIsAttr := false
-	if d.ParentKey != "" {
-		if p, ok := e.s.Def(d.ParentKey); ok {
-			if p.IsGroup() {
-				parentTri = e.applicable(p.Key)
-			} else {
-				parentIsAttr = true
-				parentTri = e.parentYes(p)
-			}
-		}
-	}
-
-	out := parentTri
-	if n := d.AppliesWhen; n != nil && len(n.Conds) > 0 {
-		terms := make([]Tri, 0, len(n.Conds)+1)
-		for _, c := range n.Conds {
-			terms = append(terms, e.cond(c))
-		}
-		switch {
-		case n.Op == OpAny && parentIsAttr:
-			out = or3(append(terms, parentTri)...)
-		case n.Op == OpAny:
-			out = and3(parentTri, or3(terms...))
-		default:
-			out = and3(append(terms, parentTri)...)
-		}
-	}
-	e.app[key] = out
-	return out
+	return fv.V, true
 }
 
-// parentYes: the parent applies and its answer is known and truthy.
-func (e *evaluator) parentYes(p *AttrDef) Tri {
-	pa := e.applicable(p.Key)
-	if pa != TriTrue {
-		return pa
+// ratio computes top ÷ (bottom ÷ per). Unknown when either input's node isn't
+// yes, a value is missing, or the bottom is zero.
+func (e *evaluator) ratio(r *RatioSpec) (float64, bool) {
+	top, ok1 := e.input(r.Top, "")
+	bottom, ok2 := e.input(r.Bottom, r.BottomUnit)
+	if !ok1 || !ok2 || bottom <= 0 || r.Per <= 0 {
+		return 0, false
 	}
-	a, has := e.answers[p.Key]
-	switch {
-	case !has || a.Status == StatusUnknown || a.Status == "":
-		return TriUnknown
-	case a.Status == StatusNA:
+	return top / (bottom / r.Per), true
+}
+
+func (e *evaluator) input(path, unit string) (float64, bool) {
+	n, f, ok := e.s.Field(path)
+	if !ok || f.Type == TypeRatio || e.eff[n.Key] != StatusYes {
+		return 0, false
+	}
+	fv := e.a.Value(n.Key, f.Key)
+	if fv == nil {
+		return 0, false
+	}
+	x, ok := numberOf(f.Type, fv.V)
+	if !ok {
+		return 0, false
+	}
+	if unit != "" {
+		var err error
+		if x, err = FromCanonical(fieldFamily(f), x, unit); err != nil {
+			return 0, false
+		}
+	}
+	return x, true
+}
+
+// cond evaluates one condition (spec 02 Evaluator §4):
+//   - is_yes: yes → T, no → F, unknown → U;
+//   - field cmp: node no → F; node unknown → U; required field missing
+//     (D-127) or ratio not computable → U; optional null → F (D-125);
+//     otherwise compare.
+func (e *evaluator) cond(c Condition) Tri {
+	n, ok := e.s.Node(c.Node)
+	if !ok {
 		return TriFalse
 	}
-	if truthy(p.Type, a.V) {
+	switch e.eff[n.Key] {
+	case StatusNo:
+		return TriFalse
+	case StatusUnknown:
+		return TriUnknown
+	}
+	if c.Cmp == CmpIsYes {
 		return TriTrue
 	}
-	return TriFalse
-}
-
-func truthy(t AttrType, v any) bool {
-	switch t {
-	case TypeBool:
-		b, _ := asBool(v)
-		return b
-	case TypePick, TypeText:
-		s, _ := asString(v)
-		return s != ""
-	case TypeMulti:
-		ss, _ := asStrings(v)
-		return len(ss) > 0
-	default: // number / range / money / calculated: answered = present
-		return v != nil
-	}
-}
-
-// cond evaluates one condition in three-valued logic (spec 02 §4).
-func (e *evaluator) cond(c Condition) Tri {
-	d, ok := e.s.Def(c.Attr)
-	if !ok || d.Retired || d.IsGroup() {
+	f, ok := n.Field(c.Field)
+	if !ok {
 		return TriFalse
 	}
-	switch e.applicable(c.Attr) {
-	case TriFalse:
-		return TriFalse
-	case TriUnknown:
-		return TriUnknown
-	}
-	a, has := e.answers[c.Attr]
-	switch {
-	case !has || a.Status == StatusUnknown || a.Status == "":
-		return TriUnknown
-	case a.Status == StatusNA: // D-038: N/A never meets a rule
+	v, present := e.value(n.Key, f)
+	if !present {
+		if f.Required || f.Type == TypeRatio {
+			return TriUnknown
+		}
 		return TriFalse
 	}
-	if compare(d.Type, a.V, c) {
+	if compare(f.Type, v, c) {
 		return TriTrue
 	}
 	return TriFalse

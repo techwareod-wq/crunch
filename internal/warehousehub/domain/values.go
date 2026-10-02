@@ -110,29 +110,40 @@ func asRange(v any) (Range, bool) {
 	return Range{Min: lo, Max: hi}, true
 }
 
-func asMoney(v any) (Money, bool) {
+// decodeDoc reads an object-shaped value into T. JSON-decoded maps (API
+// input, camelCase keys) go through encoding/json; BSON-decoded documents
+// (stored values, snake_case keys) go through bson. Unknown keys are ignored.
+func decodeDoc[T any](v any) (T, bool) {
+	var out T
 	switch x := v.(type) {
-	case Money:
+	case T:
 		return x, true
-	case *Money:
+	case *T:
 		if x == nil {
-			return Money{}, false
+			return out, false
 		}
 		return *x, true
+	case map[string]any:
+		b, err := json.Marshal(x)
+		if err != nil || json.Unmarshal(b, &out) != nil {
+			return out, false
+		}
+		return out, true
+	case bson.M, primitive.D:
+		b, err := bson.Marshal(x)
+		if err != nil || bson.Unmarshal(b, &out) != nil {
+			return out, false
+		}
+		return out, true
 	}
-	m, ok := asMap(v)
-	if !ok {
-		return Money{}, false
+	return out, false
+}
+
+// asArea reads an area value; Sqm is the canonical number.
+func asArea(v any) (Area, bool) {
+	a, ok := decodeDoc[Area](v)
+	if !ok || math.IsNaN(a.Sqm) || math.IsInf(a.Sqm, 0) {
+		return Area{}, false
 	}
-	amt, ok := asFloat(m["amount"])
-	if !ok || amt != math.Trunc(amt) {
-		return Money{}, false
-	}
-	cur, ok := m["currency"].(string)
-	if !ok {
-		return Money{}, false
-	}
-	basis, _ := m["basis"].(string)
-	period, _ := m["period"].(string)
-	return Money{Amount: int64(amt), Currency: cur, Basis: basis, Period: period}, true
+	return a, true
 }

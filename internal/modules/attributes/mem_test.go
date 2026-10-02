@@ -16,28 +16,30 @@ import (
 
 // memStore is an in-memory Store.
 type memStore struct {
-	mu   sync.Mutex
-	v    int64
-	defs map[string]domain.AttrDef
-	inds map[string]domain.Industry
+	mu    sync.Mutex
+	v     int64
+	nodes map[string]domain.Node
+	inds  map[string]domain.Industry
+	// failReplace, when set, fails the next ReplaceNode once.
+	failReplace error
 }
 
 func newMemStore() *memStore {
-	return &memStore{defs: map[string]domain.AttrDef{}, inds: map[string]domain.Industry{}}
+	return &memStore{nodes: map[string]domain.Node{}, inds: map[string]domain.Industry{}}
 }
 
 func (s *memStore) Load(context.Context) (*domain.Snapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	defs := make([]domain.AttrDef, 0, len(s.defs))
-	for _, d := range s.defs {
-		defs = append(defs, cloneDef(d))
+	nodes := make([]domain.Node, 0, len(s.nodes))
+	for _, n := range s.nodes {
+		nodes = append(nodes, n.Clone())
 	}
 	inds := make([]domain.Industry, 0, len(s.inds))
 	for _, i := range s.inds {
-		inds = append(inds, i)
+		inds = append(inds, i.Clone())
 	}
-	return domain.NewSnapshot(s.v, defs, inds), nil
+	return domain.NewSnapshot(s.v, nodes, inds), nil
 }
 
 func (s *memStore) RulesVersion(context.Context) (int64, error) {
@@ -53,25 +55,30 @@ func (s *memStore) BumpRulesVersion(context.Context) (int64, error) {
 	return s.v, nil
 }
 
-func (s *memStore) InsertDef(_ context.Context, d *domain.AttrDef) error {
+func (s *memStore) InsertNode(_ context.Context, n *domain.Node) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.defs[d.Key]; ok {
+	if _, ok := s.nodes[n.Key]; ok {
 		return errKeyExists
 	}
-	d.ID = primitive.NewObjectID()
-	s.defs[d.Key] = cloneDef(*d)
+	n.ID = primitive.NewObjectID()
+	s.nodes[n.Key] = n.Clone()
 	return nil
 }
 
-func (s *memStore) ReplaceDef(_ context.Context, d *domain.AttrDef, expected int) error {
+func (s *memStore) ReplaceNode(_ context.Context, n *domain.Node, expected int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	cur, ok := s.defs[d.Key]
+	if s.failReplace != nil {
+		err := s.failReplace
+		s.failReplace = nil
+		return err
+	}
+	cur, ok := s.nodes[n.Key]
 	if !ok || cur.Version != expected {
 		return errVersionConflict
 	}
-	s.defs[d.Key] = cloneDef(*d)
+	s.nodes[n.Key] = n.Clone()
 	return nil
 }
 
@@ -82,7 +89,7 @@ func (s *memStore) InsertIndustry(_ context.Context, ind *domain.Industry) error
 		return errKeyExists
 	}
 	ind.ID = primitive.NewObjectID()
-	s.inds[ind.Key] = *ind
+	s.inds[ind.Key] = ind.Clone()
 	return nil
 }
 
@@ -93,7 +100,18 @@ func (s *memStore) ReplaceIndustry(_ context.Context, ind *domain.Industry, expe
 	if !ok || cur.Version != expected {
 		return errVersionConflict
 	}
-	s.inds[ind.Key] = *ind
+	s.inds[ind.Key] = ind.Clone()
+	return nil
+}
+
+func (s *memStore) DeleteIndustry(_ context.Context, key string, expected int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, ok := s.inds[key]
+	if !ok || cur.Version != expected {
+		return errVersionConflict
+	}
+	delete(s.inds, key)
 	return nil
 }
 
@@ -110,15 +128,14 @@ func newMemWarehouses() *memWarehouses {
 	return &memWarehouses{status: map[primitive.ObjectID]string{}, docs: map[primitive.ObjectID]domain.LiveEvalDoc{}, proj: map[primitive.ObjectID]domain.Projection{}}
 }
 
-func (w *memWarehouses) add(status string, attrs map[string]domain.Answer) primitive.ObjectID {
+func (w *memWarehouses) add(status string, attrs domain.Attributes) primitive.ObjectID {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	id := primitive.NewObjectID()
 	d := domain.LiveEvalDoc{ID: id}
 	d.Live = &struct {
-		Attributes map[string]domain.Answer `bson:"attributes"`
-		TotalArea  *domain.Area             `bson:"total_area"`
-	}{Attributes: attrs, TotalArea: &domain.Area{Sqm: 1000}}
+		Attributes domain.Attributes `bson:"attributes"`
+	}{Attributes: attrs}
 	w.status[id], w.docs[id] = status, d
 	return id
 }
@@ -216,12 +233,23 @@ func newHarness() *harness {
 	return h
 }
 
-func (h *harness) seed() {
-	if _, err := h.svc.Seed(context.Background(), actor, true); err != nil {
+// booted runs the root bootstrap and clears the recorded side effects.
+func (h *harness) booted() *harness {
+	if err := h.svc.EnsureRoot(context.Background()); err != nil {
 		panic(err)
 	}
 	h.sent = nil
 	h.cl.Entries = nil
+	return h
+}
+
+func (h *harness) node(key string) domain.Node {
+	snap, _ := h.store.Load(context.Background())
+	n, ok := snap.Node(key)
+	if !ok {
+		panic("no node " + key)
+	}
+	return *n
 }
 
 var errBoom = errors.New("boom")

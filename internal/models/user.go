@@ -36,8 +36,8 @@ type User struct {
 	Name    string             `bson:"name"                        json:"name"`
 	// Role is user, admin or superuser (see internal/authz).
 	Role string `bson:"role" json:"role"`
-	// Permissions are an admin's assignable permissions: "editor" and/or
-	// "approver". Ignored for any other role.
+	// Permissions are an admin's assignable permissions: any of "editor",
+	// "approver", "attributes". Ignored for any other role.
 	Permissions []string `bson:"permissions,omitempty" json:"permissions,omitempty"`
 	// RoleUpdatedAt is the optimistic-concurrency token for access edits.
 	RoleUpdatedAt *time.Time `bson:"role_updated_at,omitempty" json:"role_updated_at,omitempty"`

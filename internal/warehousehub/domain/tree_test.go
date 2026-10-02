@@ -5,181 +5,133 @@ import (
 	"testing"
 )
 
-func TestValidateDef(t *testing.T) {
-	s := snap()
-	base := func() AttrDef {
-		return AttrDef{Key: "new_attr", Kind: KindAttribute, Type: TypeBool, Name: "New", ParentKey: "storage"}
+func TestValidateNode(t *testing.T) {
+	s := fixtureSnap()
+	ok := Node{Key: "racking", ParentKey: RootKey, Name: " Racking ", Fields: []Field{
+		{Key: "levels", Name: "Levels", Type: TypeNumber},
+		{Key: "per_level", Name: "Per level", Type: TypeRatio, Ratio: &RatioSpec{Top: "racking.levels", Bottom: "warehouse.total_area", Per: 1000}},
+	}}
+	n, err := ValidateNode(s, ok)
+	if err != nil || n.Name != "Racking" {
+		t.Fatalf("valid node: %v %+v", err, n)
 	}
-	cases := []struct {
-		name    string
-		mut     func(d *AttrDef)
-		wantErr string
+
+	bad := []struct {
+		name string
+		edit func(*Node)
+		msg  string
 	}{
-		{"ok under group", func(d *AttrDef) {}, ""},
-		{"ok under bool", func(d *AttrDef) { d.ParentKey = "cold_storage" }, ""},
-		{"ok under pick", func(d *AttrDef) { d.ParentKey = "temp_type" }, ""},
-		{"bad key", func(d *AttrDef) { d.Key = "Bad-Key" }, "key must match"},
-		{"missing parent", func(d *AttrDef) { d.ParentKey = "nope" }, "does not exist"},
-		{"parent is number", func(d *AttrDef) { d.ParentKey = "floor_strength" }, "must be a group or a bool/pick"},
-		{"parent is multi", func(d *AttrDef) { d.ParentKey = "zone_segregation" }, "must be a group or a bool/pick"},
-		{"calculated may sit under number", func(d *AttrDef) {
-			d.ParentKey, d.Type, d.Calc = "dock_doors", TypeCalculated, &CalcSpec{Fn: "dock_ratio"}
-		}, ""},
-		{"unknown calc fn", func(d *AttrDef) { d.Type, d.Calc = TypeCalculated, &CalcSpec{Fn: "magic"} }, "known calc fn"},
-		{"retired parent", func(d *AttrDef) { d.ParentKey = "old_attr" }, "retired"},
-		{"number without unit", func(d *AttrDef) { d.Type = TypeNumber }, "needs a unit"},
-		{"bad unit for dimension", func(d *AttrDef) {
-			d.Type, d.Unit = TypeNumber, &UnitSpec{Dimension: DimArea, Input: []string{"ft"}}
-		}, "not valid for area"},
-		{"pick without options", func(d *AttrDef) { d.Type = TypePick }, "allowed values"},
-		{"duplicate option", func(d *AttrDef) {
-			d.Type, d.AllowedValues = TypePick, []AllowedValue{{Key: "a", Label: "A"}, {Key: "a", Label: "B"}}
-		}, "duplicated"},
-		{"filterable text", func(d *AttrDef) { d.Type, d.Filterable, d.FilterRow = TypeText, true, "x" }, "cannot be filterable"},
-		{"filterable needs row", func(d *AttrDef) { d.Filterable = true }, "filterRow"},
-		{"group with type", func(d *AttrDef) { d.Kind, d.ParentKey = KindGroup, "" }, "group has no type"},
-		{"group under attribute", func(d *AttrDef) { d.Kind, d.Type, d.ParentKey = KindGroup, "", "cold_storage" }, "only sit under another group"},
-		{"appliesWhen self", func(d *AttrDef) {
-			d.AppliesWhen = &CondNode{Op: OpAny, Conds: []Condition{{Attr: "new_attr", Cmp: CmpEq, Value: true}}}
-		}, "itself"},
-		{"appliesWhen retired", func(d *AttrDef) {
-			d.AppliesWhen = &CondNode{Op: OpAny, Conds: []Condition{{Attr: "old_attr", Cmp: CmpEq, Value: true}}}
-		}, "retired attribute"},
-		{"appliesWhen bad cmp", func(d *AttrDef) {
-			d.AppliesWhen = &CondNode{Op: OpAll, Conds: []Condition{{Attr: "cold_storage", Cmp: CmpGte, Value: 1}}}
-		}, "not valid for type bool"},
-		{"appliesWhen bad op", func(d *AttrDef) {
-			d.AppliesWhen = &CondNode{Op: "xor", Conds: []Condition{{Attr: "cold_storage", Cmp: CmpEq, Value: true}}}
-		}, "op must be"},
+		{"bad key", func(n *Node) { n.Key = "Racking" }, "key"},
+		{"no parent", func(n *Node) { n.ParentKey = "" }, "parentKey"},
+		{"missing parent", func(n *Node) { n.ParentKey = "ghost" }, "does not exist"},
+		{"dup field", func(n *Node) { n.Fields = append(n.Fields, n.Fields[0]) }, "duplicate"},
+		{"unit on text", func(n *Node) {
+			n.Fields[0] = Field{Key: "x", Name: "x", Type: TypeText, Unit: &UnitSpec{Family: DimArea}}
+		}, "unit"},
+		{"pick without options", func(n *Node) { n.Fields[0] = Field{Key: "x", Name: "x", Type: TypePick} }, "options"},
+		{"required ratio", func(n *Node) { n.Fields[1].Required = true }, "can't be required"},
+		{"ratio on text", func(n *Node) {
+			n.Fields[0].Type = TypeText
+		}, "number or area"},
+		{"ratio bad unit", func(n *Node) { n.Fields[1].Ratio.BottomUnit = "ft" }, "does not fit"},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			d := base()
-			tc.mut(&d)
-			_, err := ValidateDef(s, d)
-			if tc.wantErr == "" {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-				return
-			}
-			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("err = %v, want containing %q", err, tc.wantErr)
+	for _, c := range bad {
+		t.Run(c.name, func(t *testing.T) {
+			n := ok.Clone()
+			c.edit(&n)
+			_, err := ValidateNode(s, n)
+			if err == nil || !strings.Contains(err.Error(), c.msg) {
+				t.Fatalf("err = %v, want it to mention %q", err, c.msg)
 			}
 		})
 	}
 }
 
-func TestValidateDefMoveCycle(t *testing.T) {
-	s := snap()
-	cs, _ := s.Def("cold_storage")
-	moved := *cs
-	moved.ParentKey = "deep_freeze" // under its own child
-	if _, err := ValidateDef(s, moved); err == nil || !strings.Contains(err.Error(), "under itself") {
-		t.Fatalf("cycle move: %v", err)
+func TestMoveCycle(t *testing.T) {
+	s := fixtureSnap()
+	n, _ := s.Node("cold_storage")
+	m := n.Clone()
+	m.ParentKey = "temp_control" // its own child
+	if _, err := ValidateNode(s, m); err == nil {
+		t.Fatal("cycle accepted")
 	}
-	moved.ParentKey = "cold_storage"
-	if _, err := ValidateDef(s, moved); err == nil {
+	m.ParentKey = "cold_storage"
+	if _, err := ValidateNode(s, m); err == nil {
 		t.Fatal("self-parent accepted")
 	}
 }
 
-func TestValidateDefApplicabilityCycle(t *testing.T) {
-	s := snap()
-	cs, _ := s.Def("cold_storage")
-	upd := *cs
-	// cold_storage applies when deep_freeze (its own child) is yes → cycle.
-	upd.AppliesWhen = &CondNode{Op: OpAll, Conds: []Condition{{Attr: "deep_freeze", Cmp: CmpEq, Value: true}}}
-	if _, err := ValidateDef(s, upd); err == nil || !strings.Contains(err.Error(), "cycle") {
-		t.Fatalf("applicability cycle: %v", err)
+func TestCheckFieldUpdate(t *testing.T) {
+	root := RootNode()
+	name, _ := root.Field("name")
+	upd := name.Clone()
+	upd.Name, upd.Description, upd.Order = "Listing name", "shown as the title", 9
+	if err := CheckFieldUpdate(*name, upd); err != nil {
+		t.Fatalf("rename of a locked field refused: %v", err)
 	}
-}
+	upd.Required = false
+	if err := CheckFieldUpdate(*name, upd); err == nil {
+		t.Fatal("locked field made optional")
+	}
 
-func TestValidateDefNormalizesConditionValues(t *testing.T) {
-	d := AttrDef{Key: "x_attr", Kind: KindAttribute, Type: TypeBool, Name: "X", ParentKey: "storage",
-		AppliesWhen: &CondNode{Op: OpAny, Conds: []Condition{
-			{Attr: "floor_strength", Cmp: CmpGte, Value: int32(5)},
-			{Attr: "zone_segregation", Cmp: CmpContainsAll, Value: []any{"waste"}},
-		}}}
-	out, err := ValidateDef(snap(), d)
-	if err != nil {
-		t.Fatal(err)
+	f := Field{Key: "t", Type: TypePick, Options: []Option{{Key: "a"}, {Key: "b"}}}
+	g := f.Clone()
+	g.Type = TypeMulti
+	if err := CheckFieldUpdate(f, g); err == nil {
+		t.Fatal("type change accepted (D-130)")
 	}
-	if _, ok := out.AppliesWhen.Conds[0].Value.(float64); !ok {
-		t.Fatalf("number not coerced: %T", out.AppliesWhen.Conds[0].Value)
+	g = f.Clone()
+	g.Options = g.Options[:1]
+	if err := CheckFieldUpdate(f, g); err == nil {
+		t.Fatal("option removed through update (D-138)")
 	}
-	if _, ok := out.AppliesWhen.Conds[1].Value.([]string); !ok {
-		t.Fatalf("list not coerced: %T", out.AppliesWhen.Conds[1].Value)
-	}
-}
-
-func TestCheckDefUpdate(t *testing.T) {
-	s := snap()
-	tt, _ := s.Def("temp_type")
-	upd := *tt
-	upd.AllowedValues = upd.AllowedValues[:2]
-	if err := CheckDefUpdate(*tt, upd); err == nil {
-		t.Fatal("removing an allowed value accepted")
-	}
-	upd = *tt
-	upd.Type = TypeMulti
-	if err := CheckDefUpdate(*tt, upd); err == nil {
-		t.Fatal("type change accepted")
-	}
-	fs, _ := s.Def("floor_strength")
-	upd = *fs
-	upd.Unit = &UnitSpec{Dimension: DimMass}
-	if err := CheckDefUpdate(*fs, upd); err == nil {
-		t.Fatal("dimension change accepted")
-	}
-	upd = *fs
-	upd.Name = "Floor load"
-	if err := CheckDefUpdate(*fs, upd); err != nil {
-		t.Fatal(err)
+	g = f.Clone()
+	g.Options = append(g.Options, Option{Key: "c"})
+	g.Required = true
+	if err := CheckFieldUpdate(f, g); err != nil {
+		t.Fatalf("adding an option / making required refused: %v", err)
 	}
 }
 
 func TestValidateIndustry(t *testing.T) {
-	s := snap()
-	ok := Industry{Key: "pharma2", Name: "Pharma", Required: []Condition{{Attr: "cold_storage", Cmp: CmpEq, Value: true}}}
-	if _, err := ValidateIndustry(s, ok); err != nil {
+	s := fixtureSnap()
+	ind, err := ValidateIndustry(s, Industry{Key: "pharma", Name: "Pharma",
+		Required:  []Condition{{Node: "cold_storage", Cmp: CmpIsYes}},
+		Preferred: []Condition{{Node: "cold_storage", Field: "temp_type", Cmp: CmpIn, Value: []any{"chilled", "chilled"}}}})
+	if err != nil {
 		t.Fatal(err)
 	}
-	bad := ok
-	bad.Preferred = []Condition{{Attr: "bonded_licence_no", Cmp: CmpEq, Value: "x"}}
-	if _, err := ValidateIndustry(s, bad); err == nil {
-		t.Fatal("text rule accepted")
+	if vs := ind.Preferred[0].Value.([]string); len(vs) != 1 {
+		t.Errorf("values not deduped: %v", vs)
 	}
-	bad = ok
-	bad.Required = []Condition{{Attr: "storage", Cmp: CmpEq, Value: true}}
-	if _, err := ValidateIndustry(s, bad); err == nil {
-		t.Fatal("group rule accepted")
+	for _, c := range []Condition{
+		{Node: "ghost", Cmp: CmpIsYes},
+		{Node: "cold_storage", Field: "temperature", Cmp: CmpIsYes},
+		{Node: "cold_storage", Field: "temp_type", Cmp: CmpEq, Value: "warm"},
+		{Node: "cold_storage", Field: "temperature", Cmp: CmpIn, Value: 3.0},
+		{Node: RootKey, Field: "name", Cmp: CmpEq, Value: "x"},
+	} {
+		if _, err := ValidateIndustry(s, Industry{Key: "x", Name: "x", Required: []Condition{c}}); err == nil {
+			t.Errorf("accepted %+v", c)
+		}
 	}
-	bad = ok
-	bad.Required = []Condition{{Attr: "temp_type", Cmp: CmpEq, Value: "tepid"}}
-	if _, err := ValidateIndustry(s, bad); err == nil {
-		t.Fatal("unknown option accepted")
+	if _, err := ValidateIndustry(s, Industry{Key: "x", Name: "x"}); err == nil {
+		t.Error("industry without rules accepted")
 	}
 }
 
-func TestSnapshotOrderAndDescendants(t *testing.T) {
-	s := snap()
-	if got := s.Children(""); len(got) != 3 || got[0] != "storage" {
-		t.Fatalf("roots = %v", got)
+func TestIndustryReferences(t *testing.T) {
+	ind := Industry{Required: []Condition{{Node: "cold_storage", Field: "temp_type", Cmp: CmpIn, Value: []string{"frozen"}}}}
+	if !ind.References("cold_storage", "", "") || !ind.References("cold_storage", "temp_type", "frozen") {
+		t.Error("missed a reference")
 	}
-	d := s.Descendants("cold_storage")
-	if len(d) != 3 {
-		t.Fatalf("descendants = %v", d)
+	if ind.References("cold_storage", "temp_type", "chilled") || ind.References("hazmat", "", "") {
+		t.Error("false reference")
 	}
-	if !s.IsAncestor("storage", "deep_freeze") || s.IsAncestor("deep_freeze", "storage") {
-		t.Fatal("IsAncestor wrong")
-	}
-	// Tree order is depth-first.
-	idx := map[string]int{}
-	for i, x := range s.Defs {
-		idx[x.Key] = i
-	}
-	if !(idx["storage"] < idx["cold_storage"] && idx["cold_storage"] < idx["temp_range"] && idx["temp_range"] < idx["racked_storage"]) {
-		t.Fatal("not depth-first")
+}
+
+func TestRootNodeValid(t *testing.T) {
+	if _, err := ValidateNode(EmptySnapshot(), RootNode()); err != nil {
+		t.Fatalf("RootNode invalid: %v", err)
 	}
 }

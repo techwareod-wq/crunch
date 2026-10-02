@@ -1,7 +1,8 @@
 // Package attributes is the WarehouseHub attributes module (spec 02): the
-// attribute tree and industry rules (CRUD + seed), the in-memory rules
-// snapshot other modules evaluate with (domain.Rules), and the recompute jobs
-// that keep every live warehouse's search projection in step with the rules.
+// admin-defined attribute tree (nodes + fields) and industry rules, the
+// Warehouse root bootstrap, the in-memory rules snapshot other modules
+// evaluate with (domain.Rules), and the recompute jobs that keep every live
+// warehouse's search projection in step with the rules.
 // The evaluator itself is pure and lives in internal/warehousehub/domain.
 package attributes
 
@@ -60,14 +61,6 @@ func New(appCtx *config.AppContext) *Module {
 	return m
 }
 
-// NewSeedService is the standalone service cmd/whseed uses: Mongo store and
-// change log, no recompute dispatch (running services pick the new
-// rulesVersion up on their next cache refresh).
-func NewSeedService() *Service {
-	st := mongoStore{}
-	return &Service{store: st, cache: NewCache(st.Load), log: changelog.New(), now: time.Now}
-}
-
 func (m *Module) Name() string { return "attributes" }
 
 // Rules is the snapshot other modules evaluate with (wired in
@@ -84,22 +77,23 @@ func (m *Module) dispatchKeyed(ctx context.Context, pt pipeline.ProcessType, key
 
 func (m *Module) EnsureIndexes(ctx context.Context) error { return ensureIndexes(ctx) }
 
-// Start boot-loads the rules snapshot (an empty tree is fine — the seed runs
-// after the first deploy) and starts the refresh ticker.
+// Start ensures the Warehouse root exists (D-142), boot-loads the rules
+// snapshot and starts the refresh ticker. There is no starter tree (D-135):
+// admins build everything below the root.
 func (m *Module) Start(ctx context.Context) error {
+	if err := m.svc.EnsureRoot(ctx); err != nil {
+		return fmt.Errorf("attributes root bootstrap: %w", err)
+	}
 	if err := m.cache.Reload(ctx); err != nil {
 		return fmt.Errorf("attributes cache boot load: %w", err)
 	}
 	snap := m.cache.Snapshot()
-	if len(snap.Defs) == 0 {
-		log.Warn("attribute tree empty — run POST /v1/admin/attributes/seed or cmd/whseed")
-	}
 	refresh := time.Duration(m.appCtx.Config.Values.WarehouseHub.Attributes.CacheRefreshSeconds) * time.Second
 	if refresh <= 0 {
 		refresh = defaultRefresh
 	}
 	m.cache.StartRefresh(ctx, refresh)
-	log.Info("attributes cache loaded", "rules_version", snap.Version, "defs", len(snap.Defs), "industries", len(snap.Industries))
+	log.Info("attributes cache loaded", "rules_version", snap.Version, "nodes", len(snap.Nodes), "industries", len(snap.Industries))
 	return nil
 }
 
