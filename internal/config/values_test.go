@@ -13,11 +13,8 @@ server:
   awsRegion: "ap-south-1"
 async:
   workerCount: 10
-  llmWorkerCount: 5
   maxRetries: 3
   shutdownSeconds: 30
-llm:
-  defaultMaxTokens: 5000
 `
 
 // writeValuesFile writes content to <dir>/values/<env>/values.yaml and returns
@@ -50,9 +47,6 @@ func TestLoadValues_ParsesYAML(t *testing.T) {
 	}
 	if c.Values.Async.WorkerCount != 10 {
 		t.Errorf("Async.WorkerCount = %d, want 10", c.Values.Async.WorkerCount)
-	}
-	if c.Values.LLM.DefaultMaxTokens != 5000 {
-		t.Errorf("LLM.DefaultMaxTokens = %d, want 5000", c.Values.LLM.DefaultMaxTokens)
 	}
 }
 
@@ -103,10 +97,6 @@ func TestValues_GoldenDefaults(t *testing.T) {
 			// Shared HTTP client timeout.
 			if got := v.APIs.HTTPClient.TimeoutSeconds; got != 60 {
 				t.Errorf("APIs.HTTPClient.TimeoutSeconds = %d, want 60", got)
-			}
-			// Gated-SQS backpressure pause.
-			if got := v.SQS.GatedPauseSeconds; got != 5 {
-				t.Errorf("SQS.GatedPauseSeconds = %d, want 5", got)
 			}
 			// Admin pagination caps.
 			if got := v.Admin.Pagination; got != (AdminPaginationValues{

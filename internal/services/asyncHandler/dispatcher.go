@@ -12,24 +12,15 @@ import (
 )
 
 type dispatcher struct {
-	primaryQueue    interfaces.Queue
-	secondaryQueue  interfaces.Queue
-	llmProcessTypes map[pipeline.ProcessType]bool
-	maxRetries      int
+	queue      interfaces.Queue
+	maxRetries int
 }
 
-// NewDispatcher creates a dispatcher that routes LLM process types to the
-// secondary queue and everything else to the primary queue.
-func NewDispatcher(primaryQueue, secondaryQueue interfaces.Queue, llmProcessTypes []pipeline.ProcessType, maxRetries int) interfaces.Dispatcher {
-	llmSet := make(map[pipeline.ProcessType]bool, len(llmProcessTypes))
-	for _, pt := range llmProcessTypes {
-		llmSet[pt] = true
-	}
+// NewDispatcher creates a dispatcher that publishes every job to queue.
+func NewDispatcher(queue interfaces.Queue, maxRetries int) interfaces.Dispatcher {
 	return &dispatcher{
-		primaryQueue:    primaryQueue,
-		secondaryQueue:  secondaryQueue,
-		llmProcessTypes: llmSet,
-		maxRetries:      maxRetries,
+		queue:      queue,
+		maxRetries: maxRetries,
 	}
 }
 
@@ -72,11 +63,7 @@ func (d *dispatcher) dispatch(ctx context.Context, processType string, userID st
 		return fmt.Errorf("marshal message envelope: %w", err)
 	}
 
-	q := d.primaryQueue
-	if d.llmProcessTypes[msg.ProcessType] {
-		q = d.secondaryQueue
-	}
-	return q.Enqueue(ctx, body)
+	return d.queue.Enqueue(ctx, body)
 }
 
 func newUUID() string {

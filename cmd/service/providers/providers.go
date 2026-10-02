@@ -6,14 +6,10 @@ import (
 
 	"github.com/atharva-ng/crunch/internal/config"
 	"github.com/atharva-ng/crunch/internal/cron"
-	"github.com/atharva-ng/crunch/internal/pipeline"
 	apiclient "github.com/atharva-ng/crunch/internal/providers/impl/apiClient"
 	"github.com/atharva-ng/crunch/internal/providers/impl/clerkaccounts"
 	"github.com/atharva-ng/crunch/internal/providers/impl/embed/voyage"
 	"github.com/atharva-ng/crunch/internal/providers/impl/geocode"
-	geminiimage "github.com/atharva-ng/crunch/internal/providers/impl/imageGen/gemini"
-	openaiimage "github.com/atharva-ng/crunch/internal/providers/impl/imageGen/openai"
-	llmutil "github.com/atharva-ng/crunch/internal/providers/impl/llm"
 	"github.com/atharva-ng/crunch/internal/providers/impl/llm/anthropic"
 	"github.com/atharva-ng/crunch/internal/providers/interfaces"
 	"github.com/atharva-ng/crunch/internal/services/accountService"
@@ -34,22 +30,19 @@ import (
 	searchstore "github.com/atharva-ng/crunch/internal/services/searchService/store"
 	usersvc "github.com/atharva-ng/crunch/internal/services/userservice/service"
 	userstore "github.com/atharva-ng/crunch/internal/services/userservice/store"
-	"github.com/atharva-ng/crunch/internal/tokentracker"
 	"github.com/atharva-ng/crunch/internal/util/log"
 	"github.com/atharva-ng/crunch/internal/warehousehub/changelog"
 )
 
-// InjectDefaultProviders wires the infrastructure providers: S3, the token
-// tracker, both SQS queues, the idempotency store, the LLM + image-generation
-// clients, the shared HTTP client and the dispatcher.
+// InjectDefaultProviders wires the infrastructure providers: S3, the SQS
+// queue, the idempotency store, the shared HTTP client, the geocoder and the
+// dispatcher.
 func InjectDefaultProviders(appCtx *config.AppContext) error {
 	if err := InjectDefaultS3Provider(appCtx); err != nil {
 		return err
 	}
 
-	tracker := tokentracker.New(appCtx.Config.AsyncHandler.TokenLimit, appCtx.Config.AsyncHandler.TokenWindow)
-	appCtx.TokenTracker = tracker
-	if err := InjectDefaultSQSProvider(appCtx, tracker); err != nil {
+	if err := InjectDefaultSQSProvider(appCtx); err != nil {
 		return err
 	}
 
@@ -57,26 +50,6 @@ func InjectDefaultProviders(appCtx *config.AppContext) error {
 		return err
 	}
 
-	llmValues := appCtx.Config.Values.LLM
-	appCtx.InternalServices.LLM = &config.LLMProvider{DefaultMaxTokens: llmValues.DefaultMaxTokens}
-	if appCtx.Config.LLM.AnthropicAPIKey != "" {
-		appCtx.InternalServices.LLM.Anthropic = llmutil.NewTrackedLLM(
-			anthropic.New(
-				appCtx.Config.LLM.AnthropicAPIKey,
-				llmValues.Anthropic.APIURL,
-				llmValues.Anthropic.APIVersion,
-				llmValues.Anthropic.FallbackModel,
-				llmValues.Anthropic.FallbackMaxTokens,
-				llmValues.Anthropic.RequestTimeoutSeconds,
-				0,
-			),
-			tracker,
-		)
-		log.Info("Injected Anthropic provider (with token tracking)")
-	}
-	appCtx.InternalServices.LLM.Utils = llmutil.NewLlmUtils()
-
-	appCtx.InternalServices.ImageGen = buildImageGenerator(appCtx)
 	appCtx.APIClient = apiclient.GetClient(time.Duration(appCtx.Config.Values.APIs.HTTPClient.TimeoutSeconds) * time.Second)
 	if key := appCtx.Config.Maps.GoogleAPIKey; key != "" {
 		gv := appCtx.Config.Values.APIs.Geocode
@@ -87,51 +60,11 @@ func InjectDefaultProviders(appCtx *config.AppContext) error {
 	// Dispatcher depends on Queue, so it's created after Queue injection.
 	appCtx.InternalServices.Dispatcher = asynchandler.NewDispatcher(
 		appCtx.QueueProvider,
-		appCtx.SecondaryQueueProvider,
-		llmProcessTypes,
 		appCtx.Config.AsyncHandler.MaxRetries,
 	)
 
 	return nil
 }
-
-// buildImageGenerator picks the image provider named by
-// values.apis.imageGen.defaultProvider. Nil when that provider's API key is
-// unset — callers must handle a missing generator.
-func buildImageGenerator(appCtx *config.AppContext) interfaces.ImageGenerator {
-	imageGenValues := appCtx.Config.Values.APIs.ImageGen
-	switch imageGenValues.DefaultProvider {
-	case "openai":
-		if appCtx.Config.LLM.OpenAIAPIKey == "" {
-			return nil
-		}
-		openaiImage := imageGenValues.OpenAI
-		log.Info("Injected OpenAI image generation provider")
-		return openaiimage.New(
-			appCtx.Config.LLM.OpenAIAPIKey,
-			openaiImage.APIURL,
-			openaiImage.Model,
-			openaiImage.DefaultAspectRatio,
-			time.Duration(openaiImage.RequestTimeoutSeconds)*time.Second,
-		)
-	default: // "gemini" or empty
-		if appCtx.Config.LLM.GeminiAPIKey == "" {
-			return nil
-		}
-		geminiImage := imageGenValues.Gemini
-		log.Info("Injected Gemini image generation provider")
-		return geminiimage.New(
-			appCtx.Config.LLM.GeminiAPIKey,
-			geminiImage.APIURL,
-			geminiImage.DefaultAspectRatio,
-			time.Duration(geminiImage.RequestTimeoutSeconds)*time.Second,
-		)
-	}
-}
-
-// llmProcessTypes are the process types routed to the secondary (LLM-gated)
-// queue. None yet; AI search (05) adds its own.
-var llmProcessTypes []pipeline.ProcessType
 
 // InjectDefaultServices wires the services: users, the WarehouseHub
 // services (attributes, then catalog, which evaluates with the attribute
@@ -238,20 +171,6 @@ func BuildAsyncHandler(appCtx *config.AppContext) *asynchandler.AsyncHandler {
 		appCtx.IdempotencyStore,
 		asynchandler.BuildProcessRegistry(buildServiceLocator(appCtx)),
 		appCtx.Config.AsyncHandler.WorkerCount,
-		appCtx.Config.AsyncHandler.MaxRetries,
-		appCtx.Config.AsyncHandler.ShutdownTimeout,
-		nil,
-	)
-}
-
-// BuildSecondaryAsyncHandler creates the async handler for the secondary
-// (LLM) queue with its own worker pool.
-func BuildSecondaryAsyncHandler(appCtx *config.AppContext) *asynchandler.AsyncHandler {
-	return asynchandler.NewAsyncHandler(
-		appCtx.SecondaryQueueProvider,
-		appCtx.IdempotencyStore,
-		asynchandler.BuildProcessRegistry(buildServiceLocator(appCtx)),
-		appCtx.Config.AsyncHandler.LLMWorkerCount,
 		appCtx.Config.AsyncHandler.MaxRetries,
 		appCtx.Config.AsyncHandler.ShutdownTimeout,
 		nil,

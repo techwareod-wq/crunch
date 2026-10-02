@@ -80,13 +80,10 @@ type LLMConfig struct {
 	AnthropicAPIKey string
 	// VoyageAPIKey enables embeddings (AI search similar matches, D-082).
 	VoyageAPIKey string
-	OpenAIAPIKey string
-	GeminiAPIKey string
 }
 
 type SQSConfig struct {
 	QueueURL            string
-	SecondaryQueueURL   string
 	DLQUrl              string
 	WaitTimeSeconds     int
 	VisibilityTimeout   int
@@ -95,11 +92,8 @@ type SQSConfig struct {
 
 type AsyncHandlerConfig struct {
 	WorkerCount     int
-	LLMWorkerCount  int
 	MaxRetries      int
 	ShutdownTimeout time.Duration
-	TokenLimit      int
-	TokenWindow     time.Duration
 }
 
 type AppConfig struct {
@@ -216,9 +210,7 @@ func (c *EnvConfig) IsDev() bool {
 }
 
 func (c *AppConfig) LoadLLMConfig() {
-	c.LLM.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")
 	c.LLM.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
-	c.LLM.GeminiAPIKey = os.Getenv("GEMINI_API_KEY")
 	c.LLM.VoyageAPIKey = os.Getenv("VOYAGE_API_KEY")
 }
 
@@ -228,7 +220,6 @@ func (c *AppConfig) LoadMapsConfig() {
 
 func (c *AppConfig) LoadSQSConfig() {
 	c.SQS.QueueURL = os.Getenv("SQS_QUEUE_URL")
-	c.SQS.SecondaryQueueURL = os.Getenv("SQS_SECONDARY_QUEUE_URL")
 	c.SQS.DLQUrl = os.Getenv("SQS_DLQ_URL")
 
 	waitTime := atoiEnv("SQS_WAIT_TIME_SECONDS")
@@ -262,12 +253,6 @@ func (c *AppConfig) LoadAsyncHandlerConfig() {
 	}
 	c.AsyncHandler.WorkerCount = workerCount
 
-	llmWorkerCount := atoiEnv("ASYNC_LLM_WORKER_COUNT")
-	if llmWorkerCount == 0 {
-		llmWorkerCount = c.Values.Async.LLMWorkerCount
-	}
-	c.AsyncHandler.LLMWorkerCount = llmWorkerCount
-
 	maxRetries := atoiEnv("ASYNC_MAX_RETRIES")
 	if maxRetries == 0 {
 		maxRetries = c.Values.Async.MaxRetries
@@ -279,18 +264,6 @@ func (c *AppConfig) LoadAsyncHandlerConfig() {
 		shutdownSec = c.Values.Async.ShutdownSeconds
 	}
 	c.AsyncHandler.ShutdownTimeout = time.Duration(shutdownSec) * time.Second
-
-	tokenLimit := atoiEnv("ASYNC_TOKEN_LIMIT")
-	if tokenLimit == 0 {
-		tokenLimit = c.Values.Async.TokenLimit
-	}
-	c.AsyncHandler.TokenLimit = tokenLimit
-
-	tokenWindowSec := atoiEnv("ASYNC_TOKEN_WINDOW_SECONDS")
-	if tokenWindowSec == 0 {
-		tokenWindowSec = c.Values.Async.TokenWindowSeconds
-	}
-	c.AsyncHandler.TokenWindow = time.Duration(tokenWindowSec) * time.Second
 }
 
 func LoadConfigFromEnv(c *AppConfig) error {

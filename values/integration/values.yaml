@@ -17,19 +17,13 @@ admin:
 
 async:
   workerCount: 20
-  llmWorkerCount: 10
   maxRetries: 3
   shutdownSeconds: 60
-  # Cumulative LLM token budget (input+output) per window; secondary-queue
-  # consumption pauses once it is reached. Size it to your provider tier.
-  tokenLimit: 250000
-  tokenWindowSeconds: 60
 
 sqs:
   waitTimeSeconds: 20
   visibilityTimeout: 600
   maxMessagesPerBatch: 10  # SQS hard-caps ReceiveMessage at 10
-  gatedPauseSeconds: 5  # gated consumer backpressure sleep when the token gate is closed
 
 idempotency:
   # Retention of a dedupe ledger row. Must exceed the longest redelivery window
@@ -51,12 +45,9 @@ storage:
   uploadLinkSeconds: 900   # 15 min presigned PUT for uploads
 
 llm:
-  defaultMaxTokens: 5000
   anthropic:
     apiURL: "https://api.anthropic.com/v1/messages"
     apiVersion: "2023-06-01"
-    fallbackModel: "claude-haiku-4-5-20251001"
-    fallbackMaxTokens: 1024
     requestTimeoutSeconds: 540  # per-call HTTP timeout; keep under sqs.visibilityTimeout (600)
 
 apis:
@@ -68,17 +59,6 @@ apis:
   geocode:
     apiURL: "https://maps.googleapis.com/maps/api/geocode/json"
     timeoutMillis: 800
-  imageGen:
-    defaultProvider: "openai"  # "openai" (gpt-image-2) or "gemini"
-    gemini:
-      apiURL: "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent"
-      defaultAspectRatio: "16:9"
-      requestTimeoutSeconds: 300  # 5 minutes — image generation is slow
-    openai:
-      apiURL: "https://api.openai.com/v1/images/generations"
-      model: "gpt-image-2"
-      defaultAspectRatio: "16:9"
-      requestTimeoutSeconds: 300  # 5 minutes — image generation is slow
 
 cron:
   # Scheduler sweep period. Must be <= the finest job interval; every job's

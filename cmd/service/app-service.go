@@ -44,9 +44,8 @@ func main() {
 
 	middleware.RegisterAll(nil)
 
-	// Build async handlers after all services are wired.
+	// Build the async handler after all services are wired.
 	primaryHandler := providers.BuildAsyncHandler(appCtx)
-	secondaryHandler := providers.BuildSecondaryAsyncHandler(appCtx)
 
 	// Cron scheduler: resolves who is due per registered job and enqueues onto
 	// the same queues the handlers above consume. Built after the services
@@ -62,9 +61,6 @@ func main() {
 	// Root context cancelled on SIGINT/SIGTERM for graceful shutdown.
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
-
-	appCtx.TokenTracker.Start()
-	defer appCtx.TokenTracker.Stop()
 
 	// The Warehouse root + rules snapshot must be loaded before the async
 	// handlers start consuming (recompute evaluates with it).
@@ -84,13 +80,6 @@ func main() {
 	go func() {
 		if err := primaryHandler.Start(ctx); err != nil && ctx.Err() == nil {
 			log.Error("primary async handler stopped unexpectedly", "error", err)
-		}
-	}()
-
-	// Start secondary (LLM) async handler in background.
-	go func() {
-		if err := secondaryHandler.Start(ctx); err != nil && ctx.Err() == nil {
-			log.Error("secondary async handler stopped unexpectedly", "error", err)
 		}
 	}()
 

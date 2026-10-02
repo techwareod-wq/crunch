@@ -11,11 +11,10 @@ Extracted from `central` with every SEO, billing and company/teams feature remov
 | Users + profile | `internal/services/userservice`, `GET /v1/user/profile` |
 | Admin panel API + access model (roles user/admin/superuser, permissions editor/approver/attributes) + admin action log | `cmd/service/controllers/admin`, `internal/authz`, `internal/middleware/{admin,audit}.go` |
 | Account deletion cascade (pluggable per feature) | `internal/services/accountService` |
-| Async jobs: SQS primary + LLM-gated secondary queue, retries, DLQ, idempotency | `internal/services/asyncHandler`, `internal/providers/impl/sqs` |
+| Async jobs: SQS queue, retries, DLQ, idempotency | `internal/services/asyncHandler`, `internal/providers/impl/sqs` |
 | Cron: claims, catch-up, per-job kill switch in values | `internal/cron` |
 | Pipeline DAG helper for multi-step jobs | `internal/pipeline` |
-| LLM clients (Anthropic, OpenAI, Gemini) + token budget | `internal/providers/impl/llm`, `internal/tokentracker` |
-| Image generation (OpenAI, Gemini) | `internal/providers/impl/imageGen` |
+| LLM client (Anthropic) | `internal/providers/impl/llm/anthropic` |
 | S3, shared HTTP client | `internal/providers/impl/{s3,apiClient}` |
 | Config: env vars + per-env `values/<env>/values.yaml` | `internal/config` |
 | Docker, compose, ECR + SSM deploy, GitHub Actions | `Dockerfile`, `deploy/`, `.github/workflows/` |

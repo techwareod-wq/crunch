@@ -254,22 +254,14 @@ type AdminPaginationValues struct {
 
 type AsyncValues struct {
 	WorkerCount     int `yaml:"workerCount"`
-	LLMWorkerCount  int `yaml:"llmWorkerCount"`
 	MaxRetries      int `yaml:"maxRetries"`
 	ShutdownSeconds int `yaml:"shutdownSeconds"`
-	// TokenLimit is the cumulative LLM token budget (input+output) per
-	// TokenWindowSeconds; secondary-queue consumption pauses once it is reached.
-	TokenLimit         int `yaml:"tokenLimit"`
-	TokenWindowSeconds int `yaml:"tokenWindowSeconds"`
 }
 
 type SQSValues struct {
 	WaitTimeSeconds     int `yaml:"waitTimeSeconds"`
 	VisibilityTimeout   int `yaml:"visibilityTimeout"`
 	MaxMessagesPerBatch int `yaml:"maxMessagesPerBatch"`
-	// GatedPauseSeconds is how long the gated (secondary) SQS consumer sleeps
-	// when the token-budget gate is closed before re-checking (backpressure).
-	GatedPauseSeconds int `yaml:"gatedPauseSeconds"`
 }
 
 type IdempotencyValues struct {
@@ -297,15 +289,12 @@ type StorageValues struct {
 }
 
 type LLMValues struct {
-	DefaultMaxTokens int                `yaml:"defaultMaxTokens"`
-	Anthropic        AnthropicLLMValues `yaml:"anthropic"`
+	Anthropic AnthropicLLMValues `yaml:"anthropic"`
 }
 
 type AnthropicLLMValues struct {
-	APIURL            string `yaml:"apiURL"`
-	APIVersion        string `yaml:"apiVersion"`
-	FallbackModel     string `yaml:"fallbackModel"`
-	FallbackMaxTokens int    `yaml:"fallbackMaxTokens"`
+	APIURL     string `yaml:"apiURL"`
+	APIVersion string `yaml:"apiVersion"`
 	// RequestTimeoutSeconds bounds a single Messages API call. 0 falls back to
 	// the provider's built-in default (10 min). Must stay under the SQS
 	// clustering visibility override so a slow call can't outlive its lease.
@@ -314,7 +303,6 @@ type AnthropicLLMValues struct {
 
 // APIValues holds external API base URLs and client tunables.
 type APIValues struct {
-	ImageGen   ImageGenValues   `yaml:"imageGen"`
 	HTTPClient HTTPClientValues `yaml:"httpClient"`
 	Geocode    GeocodeValues    `yaml:"geocode"`
 }
@@ -332,27 +320,6 @@ type GeocodeValues struct {
 // request timeout is externalised.
 type HTTPClientValues struct {
 	TimeoutSeconds int `yaml:"timeoutSeconds"`
-}
-
-type ImageGenValues struct {
-	// DefaultProvider selects the active image generation provider ("openai" or
-	// "gemini"). Empty defaults to "gemini" for backwards compatibility.
-	DefaultProvider string            `yaml:"defaultProvider"`
-	Gemini          GeminiImageValues `yaml:"gemini"`
-	OpenAI          OpenAIImageValues `yaml:"openai"`
-}
-
-type GeminiImageValues struct {
-	APIURL                string `yaml:"apiURL"`
-	DefaultAspectRatio    string `yaml:"defaultAspectRatio"`
-	RequestTimeoutSeconds int    `yaml:"requestTimeoutSeconds"`
-}
-
-type OpenAIImageValues struct {
-	APIURL                string `yaml:"apiURL"`
-	Model                 string `yaml:"model"`
-	DefaultAspectRatio    string `yaml:"defaultAspectRatio"`
-	RequestTimeoutSeconds int    `yaml:"requestTimeoutSeconds"`
 }
 
 // LoadValues reads the runtime values YAML into c.Values. Resolution order:

@@ -13,9 +13,6 @@ import (
 // other), which this test catches.
 //
 //   - server.allowedHosts — prod restricts the Host header; integration is open.
-//   - async.tokenLimit     — prod runs a higher LLM token budget.
-//   - async.llmWorkerCount — prod runs a larger LLM worker pool (sized to the
-//     Scale-tier Anthropic rate limits); integration stays small.
 //   - async.workerCount    — prod runs a larger general async worker pool;
 //     integration stays small.
 //   - cron.jobs.*.enabled — the per-beat kill switch, and the whole point of
@@ -49,8 +46,6 @@ func TestValues_EnvFilesDriftGuard(t *testing.T) {
 	// only sees the surface that is meant to be identical.
 	for _, v := range []*Values{&integration, &production} {
 		v.Server.AllowedHosts = nil
-		v.Async.TokenLimit = 0
-		v.Async.LLMWorkerCount = 0
 		v.Async.WorkerCount = 0
 		// Blank each cron job's on/off flag but keep the entry, so a job
 		// present in one file and missing from the other is still a drift.

@@ -25,7 +25,7 @@
                           ┌────────┴──────────────────────────┐
                           │ App talks to (with app IAM user keys):│
                           │  • S3 bucket (assets, presigned PUT)  │
-                          │  • SQS primary + secondary + DLQ      │
+                          │  • SQS queue + DLQ                    │
                           └───────────────────────────────────────┘
                           MongoDB Atlas (outside AWS), Clerk, LLM APIs
 ```
@@ -92,7 +92,6 @@
   - long poll 20s
   - visibility timeout 600s
   - batch size 10
-  - gated pause 5s
 - **Idempotency:** the dedupe ledger TTL is 384h, which exceeds SQS's 14-day max retention.
 - Also reached with the app IAM user's keys.
 
@@ -117,7 +116,7 @@
 | Instance role / profile | `crunch-server` |
 | EC2 boxes | new prod + integration (AL2023), deploy dir `/home/ec2-user/crunch-deploy/`, env `/etc/crunch/crunch.env` |
 | S3 buckets | 2 per env (D-015), see "WarehouseHub media storage" below |
-| SQS | `crunch-primary`, `crunch-secondary`, `crunch-dlq`, per environment (set redrive to the DLQ) |
+| SQS | `crunch-primary`, `crunch-dlq`, per environment (set redrive to the DLQ) |
 | App IAM user | `crunch-app`, scoped to only the crunch buckets + queues |
 | Mongo | new Atlas clusters, DB `crunchDB` (integration + prod). Local `.env` should point at a **local** Mongo |
 | GitHub vars/secrets | `AWS_REGION`, `EC2_INSTANCE_ID`, `EC2_INSTANCE_ID_INTEGRATION`, `AWS_ROLE_ARN` |
