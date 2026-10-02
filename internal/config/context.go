@@ -16,37 +16,12 @@ type contextKey string
 const appContextKey contextKey = "appContext"
 
 type LLMProvider struct {
-	OpenAI    interfaces.LlmService
 	Anthropic interfaces.LlmService
-	Gemini    interfaces.LlmService
 	Utils     interfaces.LlmUtils
 	// DefaultMaxTokens is the standard max-token budget for prompt requests
 	// (values.llm.defaultMaxTokens). Services read it instead of a dto const so
 	// the budget is tunable without a recompile.
 	DefaultMaxTokens int
-}
-
-// Default returns the provider named by name ("anthropic" | "openai" |
-// "gemini" — LLMConfig.DefaultProvider), falling back to the first configured
-// provider when that one has no API key. Nil when no provider is configured.
-func (p *LLMProvider) Default(name string) interfaces.LlmService {
-	if p == nil {
-		return nil
-	}
-	named := map[string]interfaces.LlmService{
-		"anthropic": p.Anthropic,
-		"openai":    p.OpenAI,
-		"gemini":    p.Gemini,
-	}
-	if svc := named[name]; svc != nil {
-		return svc
-	}
-	for _, svc := range []interfaces.LlmService{p.Anthropic, p.OpenAI, p.Gemini} {
-		if svc != nil {
-			return svc
-		}
-	}
-	return nil
 }
 
 type InternalServices struct {
@@ -55,9 +30,7 @@ type InternalServices struct {
 	LLM            *LLMProvider
 	// ImageGen is the configured image-generation provider
 	// (values.apis.imageGen.defaultProvider); nil when its API key is unset.
-	ImageGen interfaces.ImageGenerator
-	// Mailer sends transactional email; Enabled() is false with no SMTP_HOST.
-	Mailer     interfaces.Mailer
+	ImageGen   interfaces.ImageGenerator
 	Dispatcher interfaces.Dispatcher
 	// ClerkAccounts is the outbound Clerk Backend API (account deletes).
 	ClerkAccounts interfaces.ClerkAccounts

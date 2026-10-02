@@ -166,11 +166,8 @@ type StorageValues struct {
 }
 
 type LLMValues struct {
-	DefaultProvider  string             `yaml:"defaultProvider"`
 	DefaultMaxTokens int                `yaml:"defaultMaxTokens"`
 	Anthropic        AnthropicLLMValues `yaml:"anthropic"`
-	OpenAI           OpenAILLMValues    `yaml:"openai"`
-	Gemini           GeminiLLMValues    `yaml:"gemini"`
 }
 
 type AnthropicLLMValues struct {
@@ -182,18 +179,6 @@ type AnthropicLLMValues struct {
 	// the provider's built-in default (10 min). Must stay under the SQS
 	// clustering visibility override so a slow call can't outlive its lease.
 	RequestTimeoutSeconds int `yaml:"requestTimeoutSeconds"`
-}
-
-type OpenAILLMValues struct {
-	APIURL string `yaml:"apiURL"`
-	// FallbackModel is used when a prompt request does not specify a model.
-	FallbackModel string `yaml:"fallbackModel"`
-}
-
-type GeminiLLMValues struct {
-	APIURL string `yaml:"apiURL"`
-	// FallbackModel is used when a prompt request does not specify a model.
-	FallbackModel string `yaml:"fallbackModel"`
 }
 
 // APIValues holds external API base URLs and client tunables.

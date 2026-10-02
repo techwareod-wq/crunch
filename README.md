@@ -9,14 +9,14 @@ Extracted from `central` with every SEO, billing and company/teams feature remov
 |---|---|
 | Clerk auth (JWT middleware, user sync webhook, lazy user creation) | `internal/middleware/jwt.go`, `cmd/service/controllers/webhooks` |
 | Users + profile | `internal/services/userservice`, `GET /v1/user/profile` |
-| Admin panel API + DB-backed RBAC roles + admin action log | `cmd/service/controllers/admin`, `internal/authz`, `internal/middleware/{admin,audit}.go` |
+| Admin panel API + access model (roles user/admin/superuser, permissions editor/approver/attributes) + admin action log | `cmd/service/controllers/admin`, `internal/authz`, `internal/middleware/{admin,audit}.go` |
 | Account deletion cascade (pluggable per feature) | `internal/services/accountService` |
 | Async jobs: SQS primary + LLM-gated secondary queue, retries, DLQ, idempotency | `internal/services/asyncHandler`, `internal/providers/impl/sqs` |
 | Cron: claims, catch-up, per-job kill switch in values | `internal/cron` |
 | Pipeline DAG helper for multi-step jobs | `internal/pipeline` |
 | LLM clients (Anthropic, OpenAI, Gemini) + token budget | `internal/providers/impl/llm`, `internal/tokentracker` |
 | Image generation (OpenAI, Gemini) | `internal/providers/impl/imageGen` |
-| S3, SMTP mailer, shared HTTP client | `internal/providers/impl/{s3,mailer,apiClient}` |
+| S3, shared HTTP client | `internal/providers/impl/{s3,apiClient}` |
 | Config: env vars + per-env `values/<env>/values.yaml` | `internal/config` |
 | Docker, compose, ECR + SSM deploy, GitHub Actions | `Dockerfile`, `deploy/`, `.github/workflows/` |
 
@@ -29,7 +29,7 @@ A feature is a **module** (`internal/modules`). It can add:
 - HTTP routes
 - a data cleaner for account deletion
 
-Write a module (embed `modules.Base`; `internal/modules/mail` is a small real example), then add one line to `cmd/service/modules.go`. You don't need to edit any platform package.
+Write a module (embed `modules.Base`; `internal/modules/attributes` is the real example), then add one line to `cmd/service/modules.go`. You don't need to edit any platform package.
 
 The WarehouseHub feature modules live in `internal/modules/{attributes,catalog,search,aisearch,enquiries,analytics}`; their shared types are in `internal/warehousehub/domain`.
 

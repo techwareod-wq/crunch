@@ -8,7 +8,6 @@ import (
 	"github.com/atharva-ng/crunch/internal/modules/attributes"
 	"github.com/atharva-ng/crunch/internal/modules/catalog"
 	"github.com/atharva-ng/crunch/internal/modules/enquiries"
-	"github.com/atharva-ng/crunch/internal/modules/mail"
 	"github.com/atharva-ng/crunch/internal/modules/search"
 )
 
@@ -21,8 +20,6 @@ func enabledModules(appCtx *config.AppContext) []modules.Module {
 	// (04) evaluate with; hand it to them as they land.
 	attrs := attributes.New(appCtx)
 	return []modules.Module{
-		mail.New(appCtx), // platform: mail.send job (D-103)
-
 		// WarehouseHub (D-004): one module per service.
 		attrs,
 		catalog.New(appCtx),

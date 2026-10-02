@@ -100,14 +100,6 @@ func TestValues_GoldenDefaults(t *testing.T) {
 			}
 			v := c.Values
 
-			// OpenAI fallback model.
-			if got := v.LLM.OpenAI.FallbackModel; got != "gpt-4o" {
-				t.Errorf("LLM.OpenAI.FallbackModel = %q, want %q", got, "gpt-4o")
-			}
-			// Gemini fallback model.
-			if got := v.LLM.Gemini.FallbackModel; got != "gemini-2.0-flash" {
-				t.Errorf("LLM.Gemini.FallbackModel = %q, want %q", got, "gemini-2.0-flash")
-			}
 			// Shared HTTP client timeout.
 			if got := v.APIs.HTTPClient.TimeoutSeconds; got != 60 {
 				t.Errorf("APIs.HTTPClient.TimeoutSeconds = %d, want 60", got)

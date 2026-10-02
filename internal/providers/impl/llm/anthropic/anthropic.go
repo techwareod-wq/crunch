@@ -75,15 +75,7 @@ type apiMessage struct {
 type contentBlock struct {
 	Type         string        `json:"type"`
 	Text         string        `json:"text,omitempty"`
-	Source       *imageSource  `json:"source,omitempty"`
 	CacheControl *cacheControl `json:"cache_control,omitempty"`
-}
-
-// imageSource is the base64 source of an image content block (vision input).
-type imageSource struct {
-	Type      string `json:"type"` // always "base64"
-	MediaType string `json:"media_type"`
-	Data      string `json:"data"`
 }
 
 type cacheControl struct {
@@ -157,24 +149,14 @@ func (s *anthropicService) Prompt(ctx context.Context, req dto.PromptRequest) (*
 // System messages become system blocks; consecutive same-role messages merge
 // into one API message with multiple content blocks (the API rejects
 // consecutive same-role messages, and multi-block lets a cached static prefix
-// and uncached dynamic suffix ride the same user turn). A message's Images
-// render as image blocks before its text block (vision input). A message's
-// Cache flag becomes a cache_control breakpoint on its LAST block — the
+// and uncached dynamic suffix ride the same user turn). A message's Cache
+// flag becomes a cache_control breakpoint on its LAST block — the
 // breakpoint covers everything up to and including it — capped at the API's
 // limit of 4 per request (extras are dropped with a warning).
 func buildContent(messages []dto.Message) ([]contentBlock, []apiMessage) {
 	breakpoints := 0
 	blocks := func(m dto.Message) []contentBlock {
-		var out []contentBlock
-		for _, img := range m.Images {
-			out = append(out, contentBlock{
-				Type:   "image",
-				Source: &imageSource{Type: "base64", MediaType: img.MediaType, Data: img.Data},
-			})
-		}
-		if m.Content != "" || len(out) == 0 {
-			out = append(out, contentBlock{Type: "text", Text: m.Content})
-		}
+		out := []contentBlock{{Type: "text", Text: m.Content}}
 		if m.Cache {
 			if breakpoints < maxCacheBreakpoints {
 				out[len(out)-1].CacheControl = &cacheControl{Type: "ephemeral"}

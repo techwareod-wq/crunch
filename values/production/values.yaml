@@ -55,7 +55,6 @@ storage:
   uploadLinkSeconds: 900   # 15 min presigned PUT for uploads
 
 llm:
-  defaultProvider: "anthropic"  # "anthropic" | "openai" | "gemini"; env override LLM_DEFAULT_PROVIDER
   defaultMaxTokens: 5000
   anthropic:
     apiURL: "https://api.anthropic.com/v1/messages"
@@ -63,12 +62,6 @@ llm:
     fallbackModel: "claude-haiku-4-5-20251001"
     fallbackMaxTokens: 1024
     requestTimeoutSeconds: 540  # per-call HTTP timeout; keep under sqs.visibilityTimeout (600)
-  openai:
-    apiURL: "https://api.openai.com/v1/chat/completions"
-    fallbackModel: "gpt-4o"
-  gemini:
-    apiURL: "https://generativelanguage.googleapis.com/v1beta/models"
-    fallbackModel: "gemini-2.0-flash"
 
 apis:
   # Shared http.Client used by ApiClient.

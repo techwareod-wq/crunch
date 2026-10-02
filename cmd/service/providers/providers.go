@@ -13,9 +13,6 @@ import (
 	openaiimage "github.com/atharva-ng/crunch/internal/providers/impl/imageGen/openai"
 	llmutil "github.com/atharva-ng/crunch/internal/providers/impl/llm"
 	"github.com/atharva-ng/crunch/internal/providers/impl/llm/anthropic"
-	"github.com/atharva-ng/crunch/internal/providers/impl/llm/gemini"
-	"github.com/atharva-ng/crunch/internal/providers/impl/llm/openai"
-	"github.com/atharva-ng/crunch/internal/providers/impl/mailer"
 	"github.com/atharva-ng/crunch/internal/providers/interfaces"
 	accountsvc "github.com/atharva-ng/crunch/internal/services/accountService/service"
 	accountstore "github.com/atharva-ng/crunch/internal/services/accountService/store"
@@ -28,7 +25,7 @@ import (
 
 // InjectDefaultProviders wires the infrastructure providers: S3, the token
 // tracker, both SQS queues, the idempotency store, the LLM + image-generation
-// clients, the mailer, the shared HTTP client and the dispatcher. mods supply
+// clients, the shared HTTP client and the dispatcher. mods supply
 // the process types routed to the secondary (LLM-gated) queue.
 func InjectDefaultProviders(appCtx *config.AppContext, mods []modules.Module) error {
 	if err := InjectDefaultS3Provider(appCtx); err != nil {
@@ -47,10 +44,6 @@ func InjectDefaultProviders(appCtx *config.AppContext, mods []modules.Module) er
 
 	llmValues := appCtx.Config.Values.LLM
 	appCtx.InternalServices.LLM = &config.LLMProvider{DefaultMaxTokens: llmValues.DefaultMaxTokens}
-	if appCtx.Config.LLM.OpenAIAPIKey != "" {
-		appCtx.InternalServices.LLM.OpenAI = openai.New(appCtx.Config.LLM.OpenAIAPIKey, llmValues.OpenAI.APIURL, llmValues.OpenAI.FallbackModel)
-		log.Info("Injected OpenAI provider")
-	}
 	if appCtx.Config.LLM.AnthropicAPIKey != "" {
 		appCtx.InternalServices.LLM.Anthropic = llmutil.NewTrackedLLM(
 			anthropic.New(
@@ -65,14 +58,9 @@ func InjectDefaultProviders(appCtx *config.AppContext, mods []modules.Module) er
 		)
 		log.Info("Injected Anthropic provider (with token tracking)")
 	}
-	if appCtx.Config.LLM.GeminiAPIKey != "" {
-		appCtx.InternalServices.LLM.Gemini = gemini.New(appCtx.Config.LLM.GeminiAPIKey, llmValues.Gemini.APIURL, llmValues.Gemini.FallbackModel)
-		log.Info("Injected Gemini provider")
-	}
 	appCtx.InternalServices.LLM.Utils = llmutil.NewLlmUtils()
 
 	appCtx.InternalServices.ImageGen = buildImageGenerator(appCtx)
-	appCtx.InternalServices.Mailer = mailer.New(appCtx.Config.Mailer)
 	appCtx.APIClient = apiclient.GetClient(time.Duration(appCtx.Config.Values.APIs.HTTPClient.TimeoutSeconds) * time.Second)
 
 	// Dispatcher depends on Queue, so it's created after Queue injection.

@@ -70,10 +70,9 @@ type AWSConfig struct {
 }
 
 type LLMConfig struct {
-	OpenAIAPIKey    string
 	AnthropicAPIKey string
+	OpenAIAPIKey    string
 	GeminiAPIKey    string
-	DefaultProvider string
 }
 
 type SQSConfig struct {
@@ -103,32 +102,9 @@ type AppConfig struct {
 	LLM          LLMConfig
 	SQS          SQSConfig
 	AsyncHandler AsyncHandlerConfig
-	Mailer       MailerConfig
 	// Values holds the YAML-sourced runtime tunables + external API URLs. The
 	// loaders below read it as their default layer (env vars still override).
 	Values Values
-}
-
-// MailerConfig holds the SMTP transport for transactional email. An empty
-// Host disables sending.
-type MailerConfig struct {
-	Host     string // SMTP_HOST
-	Port     string // SMTP_PORT (default "587")
-	Username string // SMTP_USERNAME
-	Password string // SMTP_PASSWORD
-	From     string // SMTP_FROM
-}
-
-// LoadMailerConfig loads the SMTP mailer transport.
-func (c *AppConfig) LoadMailerConfig() {
-	c.Mailer.Host = os.Getenv("SMTP_HOST")
-	c.Mailer.Port = os.Getenv("SMTP_PORT")
-	if c.Mailer.Port == "" {
-		c.Mailer.Port = "587"
-	}
-	c.Mailer.Username = os.Getenv("SMTP_USERNAME")
-	c.Mailer.Password = os.Getenv("SMTP_PASSWORD")
-	c.Mailer.From = os.Getenv("SMTP_FROM")
 }
 
 func (c *AppConfig) LoadDatabaseConfig() {
@@ -221,10 +197,6 @@ func (c *AppConfig) LoadLLMConfig() {
 	c.LLM.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")
 	c.LLM.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
 	c.LLM.GeminiAPIKey = os.Getenv("GEMINI_API_KEY")
-	c.LLM.DefaultProvider = os.Getenv("LLM_DEFAULT_PROVIDER")
-	if c.LLM.DefaultProvider == "" {
-		c.LLM.DefaultProvider = c.Values.LLM.DefaultProvider
-	}
 }
 
 func (c *AppConfig) LoadSQSConfig() {
@@ -309,6 +281,5 @@ func LoadConfigFromEnv(c *AppConfig) error {
 	c.LoadLLMConfig()
 	c.LoadSQSConfig()
 	c.LoadAsyncHandlerConfig()
-	c.LoadMailerConfig()
 	return nil
 }
