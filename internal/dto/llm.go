@@ -1,5 +1,7 @@
 package dto
 
+import "encoding/json"
+
 const (
 	// AnthropicSonnet5 is the Claude Sonnet 5 model identifier. Fixed id, no
 	// date suffix. Adaptive thinking is ON when the request omits a thinking
@@ -33,10 +35,34 @@ type Message struct {
 }
 
 type PromptRequest struct {
-	Messages    []Message `json:"messages"`
-	Model       string    `json:"model,omitempty"`
-	MaxTokens   int       `json:"max_tokens,omitempty"`
-	Temperature float64   `json:"temperature,omitempty"`
+	Messages  []Message `json:"messages"`
+	Model     string    `json:"model,omitempty"`
+	MaxTokens int       `json:"max_tokens,omitempty"`
+	// Temperature is sent only when set. Claude Sonnet 5 / Opus 4.7+ reject
+	// any sampling parameter (400), so leave it nil for those models.
+	Temperature *float64 `json:"temperature,omitempty"`
+	// Tools the model may call. ForceTool names one of them: the model must
+	// answer with exactly that tool call (structured extraction).
+	Tools     []ToolDef `json:"tools,omitempty"`
+	ForceTool string    `json:"force_tool,omitempty"`
+	// DisableThinking turns adaptive thinking off (Sonnet 5 thinks by
+	// default). Needed for low-latency forced-tool extraction.
+	DisableThinking bool `json:"disable_thinking,omitempty"`
+}
+
+// ToolDef is a client tool: name, description and a JSON Schema for its
+// input.
+type ToolDef struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	InputSchema json.RawMessage `json:"input_schema"`
+}
+
+// ToolUse is a tool call the model made. Input is the raw JSON arguments;
+// always json.Unmarshal it (escaping varies by model).
+type ToolUse struct {
+	Name  string          `json:"name"`
+	Input json.RawMessage `json:"input"`
 }
 
 type PromptResponse struct {
@@ -50,4 +76,6 @@ type PromptResponse struct {
 	// Callers parsing structured output should treat "max_tokens" as a
 	// truncated, unparseable response rather than a malformed one.
 	StopReason string `json:"stop_reason"`
+	// ToolUse is the first tool call in the response, if any.
+	ToolUse *ToolUse `json:"tool_use,omitempty"`
 }

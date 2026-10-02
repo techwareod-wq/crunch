@@ -270,6 +270,25 @@ func TestIntegrationSearch(t *testing.T) {
 		}
 	})
 
+	t.Run("keyword fallback", func(t *testing.T) {
+		q := searchService.FallbackQuery{Near: &pune, Exclude: []string{"w00001"}, Limit: 5}
+		cards, err := s.Keyword(ctx, "pune", q)
+		if err != nil || len(cards) != 5 || slices.ContainsFunc(cards, func(c domain.SearchCard) bool { return c.ShortID == "w00001" }) {
+			t.Fatalf("cards = %+v %v", cards, err)
+		}
+		if cards[0].DistKm == nil {
+			t.Error("distance not set")
+		}
+		// Archived / foreign listings never match; far away nothing is in range.
+		delhi := domain.LatLng{Lat: 28.6, Lng: 77.2}
+		if cards, _ := s.Keyword(ctx, "pune", searchService.FallbackQuery{Near: &delhi}); len(cards) != 0 {
+			t.Errorf("delhi = %d cards", len(cards))
+		}
+		if cards, _ := s.Keyword(ctx, "nonexistentword", searchService.FallbackQuery{}); len(cards) != 0 {
+			t.Errorf("nonsense = %d", len(cards))
+		}
+	})
+
 	t.Run("map", func(t *testing.T) {
 		m, etag, err := s.Map(ctx, nil, "IN")
 		if err != nil || m.Total != 50 || etag == "" {

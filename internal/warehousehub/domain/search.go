@@ -24,7 +24,18 @@ const (
 	GeoSourceGoogle  = "google"
 	GeoSourcePincode = "pincode"
 
-	DegradedGeocode = "geocode_unavailable"
+	DegradedGeocode  = "geocode_unavailable"
+	DegradedSemantic = "semantic_unavailable"
+)
+
+// Fallback reasons and sources (05, D-084 / D-088).
+const (
+	FallbackFewResults    = "few_results"
+	FallbackNothingMapped = "nothing_mapped"
+	FallbackLLMFailed     = "llm_failed"
+
+	FallbackSemantic = "semantic"
+	FallbackKeyword  = "keyword"
 )
 
 // SearchFilters is the search input (POST /v1/public/search body).
@@ -172,9 +183,21 @@ type Bounds struct {
 
 // SearchFallback carries 05's similar matches.
 type SearchFallback struct {
-	Used    bool         `json:"used"`
-	Reason  string       `json:"reason"`
+	Used   bool   `json:"used"`
+	Reason string `json:"reason"`
+	// Source: semantic (vector) or keyword ($text).
+	Source  string       `json:"source"`
 	Results []SearchCard `json:"results"`
+}
+
+// SearchAI describes the natural-language parse (05).
+type SearchAI struct {
+	// Parsed: the model returned usable filters; false = basic search on
+	// the regex pre-parse (D-088).
+	Parsed    bool     `json:"parsed"`
+	Model     string   `json:"model"`
+	LatencyMs int64    `json:"latencyMs"`
+	Notes     []string `json:"notes"`
 }
 
 // SearchEvent is one logged search (07).
@@ -191,6 +214,10 @@ type SearchEvent struct {
 	// analytics can exclude them.
 	UserID string
 	Staff  bool
+	// AI is set for natural-language searches (05); Fallback names the
+	// similar-matches reason when they were added.
+	AI       *SearchAI
+	Fallback string
 }
 
 // SearchLogger records searches (implemented by analytics, 07). Called in

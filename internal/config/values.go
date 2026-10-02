@@ -46,6 +46,39 @@ type WarehouseHubValues struct {
 	Catalog CatalogValues `yaml:"catalog"`
 	// Search tunes structured search and the map (spec 04).
 	Search SearchValues `yaml:"search"`
+	// AISearch tunes natural-language search (spec 05).
+	AISearch AISearchValues `yaml:"aisearch"`
+}
+
+// AISearchValues is the `warehousehub.aisearch` block.
+type AISearchValues struct {
+	// Enabled is the AI search feature flag. Off: the AI routes aren't
+	// registered (404), approve queues no embed jobs and queued ones no-op.
+	// Structured search is unaffected.
+	Enabled bool `yaml:"enabled"`
+	// Model is the extraction model (D-080).
+	Model string `yaml:"model"`
+	// MaxTokens caps the set_filters tool call.
+	MaxTokens int `yaml:"maxTokens"`
+	// LLMDeadlineMillis is the hard deadline on the LLM call; past it the
+	// search runs on the regex pre-parse (D-088).
+	LLMDeadlineMillis int `yaml:"llmDeadlineMillis"`
+	// MaxQueryChars truncates the query.
+	MaxQueryChars int `yaml:"maxQueryChars"`
+	// FallbackThreshold: fewer results than this (after radius expansion)
+	// adds similar matches (D-084).
+	FallbackThreshold int `yaml:"fallbackThreshold"`
+	// FallbackLimit caps the similar matches returned.
+	FallbackLimit int `yaml:"fallbackLimit"`
+	// Embeddings (D-082): Voyage endpoint, model and output dimension. A
+	// model change re-embeds on the next reembed-all.
+	VoyageURL          string `yaml:"voyageURL"`
+	EmbedModel         string `yaml:"embedModel"`
+	EmbedDims          int    `yaml:"embedDims"`
+	EmbedTimeoutMillis int    `yaml:"embedTimeoutMillis"`
+	// Atlas Vector Search (D-084): index name and candidate pool.
+	VectorIndex         string `yaml:"vectorIndex"`
+	VectorNumCandidates int    `yaml:"vectorNumCandidates"`
 }
 
 // SearchValues is the `warehousehub.search` block.

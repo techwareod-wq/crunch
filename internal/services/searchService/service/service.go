@@ -109,7 +109,9 @@ func (s *svc) Search(ctx context.Context, f domain.SearchFilters, v searchServic
 	if resp.Radius != nil && resp.Radius.Exhausted && res.Total == 0 {
 		resp.Radius.Message = fmt.Sprintf("No warehouses within %d km.", resp.Radius.UsedKm)
 	}
-	s.logSearch(resp, v)
+	if !v.Quiet {
+		s.logSearch(resp, v)
+	}
 	return resp, nil
 }
 

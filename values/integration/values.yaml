@@ -150,3 +150,26 @@ warehousehub:
     # Geocoder circuit breaker.
     breakerFailures: 5
     breakerOpenSeconds: 60
+  aisearch:
+    # Feature flag. Off: /v1/public/search/ai and reembed-all return 404,
+    # approve queues no embed jobs. Structured search is unaffected.
+    enabled: false
+    # Extraction model (D-080) and its hard deadline; past it the search runs
+    # on the regex pre-parse (D-088).
+    model: claude-sonnet-5
+    maxTokens: 1024
+    llmDeadlineMillis: 2200
+    maxQueryChars: 300
+    # Fewer results than this after radius expansion adds similar matches
+    # (D-084).
+    fallbackThreshold: 5
+    fallbackLimit: 10
+    # Embeddings (key: VOYAGE_API_KEY). Changing the model or dims needs a
+    # new Atlas vector index and a reembed-all.
+    voyageURL: "https://api.voyageai.com/v1/embeddings"
+    embedModel: voyage-3.5-lite
+    embedDims: 1024
+    embedTimeoutMillis: 600
+    # Atlas Vector Search index (deploy/ATLAS_INDEXES.md).
+    vectorIndex: wh_embedding
+    vectorNumCandidates: 200

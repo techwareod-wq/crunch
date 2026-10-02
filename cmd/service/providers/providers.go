@@ -9,6 +9,7 @@ import (
 	"github.com/atharva-ng/crunch/internal/pipeline"
 	apiclient "github.com/atharva-ng/crunch/internal/providers/impl/apiClient"
 	"github.com/atharva-ng/crunch/internal/providers/impl/clerkaccounts"
+	"github.com/atharva-ng/crunch/internal/providers/impl/embed/voyage"
 	"github.com/atharva-ng/crunch/internal/providers/impl/geocode"
 	geminiimage "github.com/atharva-ng/crunch/internal/providers/impl/imageGen/gemini"
 	openaiimage "github.com/atharva-ng/crunch/internal/providers/impl/imageGen/openai"
@@ -17,6 +18,8 @@ import (
 	"github.com/atharva-ng/crunch/internal/providers/interfaces"
 	accountsvc "github.com/atharva-ng/crunch/internal/services/accountService/service"
 	accountstore "github.com/atharva-ng/crunch/internal/services/accountService/store"
+	aisearchsvc "github.com/atharva-ng/crunch/internal/services/aiSearchService/service"
+	aisearchstore "github.com/atharva-ng/crunch/internal/services/aiSearchService/store"
 	asynchandler "github.com/atharva-ng/crunch/internal/services/asyncHandler"
 	attributesvc "github.com/atharva-ng/crunch/internal/services/attributeService/service"
 	attributestore "github.com/atharva-ng/crunch/internal/services/attributeService/store"
@@ -60,6 +63,7 @@ func InjectDefaultProviders(appCtx *config.AppContext) error {
 				llmValues.Anthropic.FallbackModel,
 				llmValues.Anthropic.FallbackMaxTokens,
 				llmValues.Anthropic.RequestTimeoutSeconds,
+				0,
 			),
 			tracker,
 		)
@@ -127,7 +131,7 @@ var llmProcessTypes []pipeline.ProcessType
 // InjectDefaultServices wires the services: users, the account-deletion
 // cascade and the WarehouseHub services (attributes, then catalog, which
 // evaluates with the attribute rules, then search, which also serves the
-// catalog's 410 nearby list).
+// catalog's 410 nearby list, then AI search on top of search).
 func InjectDefaultServices(appCtx *config.AppContext) error {
 	appCtx.InternalServices.UserService = usersvc.NewService(userstore.NewStore())
 
@@ -166,6 +170,31 @@ func InjectDefaultServices(appCtx *config.AppContext) error {
 	)
 	appCtx.InternalServices.SearchService = search
 	appCtx.InternalServices.CatalogService.SetSearchEngine(search)
+
+	// AI search gets its own Anthropic client: one attempt, no backoff, no
+	// token-tracker gate; the service's deadline bounds the call (spec 05).
+	aiValues := appCtx.Config.Values.WarehouseHub.AISearch
+	var searchLLM interfaces.LlmService
+	if key := appCtx.Config.LLM.AnthropicAPIKey; key != "" {
+		llmValues := appCtx.Config.Values.LLM.Anthropic
+		searchLLM = anthropic.New(key, llmValues.APIURL, llmValues.APIVersion, aiValues.Model, aiValues.MaxTokens,
+			llmValues.RequestTimeoutSeconds, 1)
+	}
+	var embedder interfaces.Embedder
+	if key := appCtx.Config.LLM.VoyageAPIKey; key != "" {
+		embedder = voyage.New(appCtx.APIClient, aiValues.VoyageURL, key, aiValues.EmbedModel, aiValues.EmbedDims,
+			time.Duration(aiValues.EmbedTimeoutMillis)*time.Millisecond)
+		log.Info("Injected Voyage embedder", "model", aiValues.EmbedModel)
+	}
+	appCtx.InternalServices.AISearchService = aisearchsvc.NewService(
+		aisearchstore.NewStore(),
+		attributes.Rules(),
+		search,
+		searchLLM,
+		embedder,
+		appCtx.InternalServices.Dispatcher,
+		aiValues,
+	)
 	log.Info("Injected WarehouseHub services")
 
 	return nil
@@ -175,6 +204,7 @@ func buildServiceLocator(appCtx *config.AppContext) *asynchandler.ServiceLocator
 	return &asynchandler.ServiceLocator{
 		AttributeService: appCtx.InternalServices.AttributeService,
 		CatalogService:   appCtx.InternalServices.CatalogService,
+		AISearchService:  appCtx.InternalServices.AISearchService,
 	}
 }
 

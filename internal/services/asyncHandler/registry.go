@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/atharva-ng/crunch/internal/pipeline"
+	"github.com/atharva-ng/crunch/internal/services/aiSearchService"
 	"github.com/atharva-ng/crunch/internal/services/attributeService"
 	"github.com/atharva-ng/crunch/internal/services/catalogService"
 )
@@ -17,6 +18,7 @@ type Registry map[pipeline.ProcessType]ProcessHandler
 type ServiceLocator struct {
 	AttributeService attributeService.AttributeService
 	CatalogService   catalogService.CatalogService
+	AISearchService  aiSearchService.AISearchService
 }
 
 // BuildProcessRegistry binds every process type to its service handler.
@@ -24,6 +26,7 @@ func BuildProcessRegistry(locator *ServiceLocator) Registry {
 	registry := NewRegistry()
 	registerAttributeHandlers(registry, locator)
 	registerCatalogHandlers(registry, locator)
+	registerAISearchHandlers(registry, locator)
 	return registry
 }
 
@@ -47,6 +50,16 @@ func registerCatalogHandlers(registry Registry, locator *ServiceLocator) {
 	}))
 	registry.Register(catalogService.ProcessMediaGC, Typed(func(ctx context.Context, _ string, _ struct{}) error {
 		return svc.MediaGC(ctx)
+	}))
+}
+
+func registerAISearchHandlers(registry Registry, locator *ServiceLocator) {
+	svc := locator.AISearchService
+	registry.Register(aiSearchService.ProcessEmbed, Typed(func(ctx context.Context, _ string, p aiSearchService.EmbedPayload) error {
+		return svc.Embed(ctx, p)
+	}))
+	registry.Register(aiSearchService.ProcessReembedAll, Typed(func(ctx context.Context, _ string, p aiSearchService.ReembedAllPayload) error {
+		return svc.ReembedAll(ctx, p)
 	}))
 }
 

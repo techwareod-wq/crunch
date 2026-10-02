@@ -28,6 +28,7 @@ type fakeStore struct {
 	cache    map[string]models.GeocodeCacheEntry
 	pins     map[string]models.Pincode
 	pinErr   error
+	vecErr   error
 }
 
 func newFakeStore() *fakeStore {
@@ -59,6 +60,14 @@ func (f *fakeStore) Nearest(context.Context, models.GeoPoint, int, primitive.Obj
 }
 
 func (f *fakeStore) CatalogVersion(context.Context) (int64, error) { return f.catalogV, nil }
+
+func (f *fakeStore) Vector(context.Context, string, []float32, int, int, string) ([]models.SearchHit, error) {
+	return f.result.Hits, f.vecErr
+}
+
+func (f *fakeStore) Text(context.Context, string, string, int) ([]models.SearchHit, error) {
+	return f.result.Hits, nil
+}
 
 func (f *fakeStore) GetGeocode(_ context.Context, key string, now time.Time) (*models.GeocodeCacheEntry, error) {
 	if e, ok := f.cache[key]; ok && e.ExpiresAt.After(now) {

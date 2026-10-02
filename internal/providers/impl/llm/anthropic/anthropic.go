@@ -20,10 +20,11 @@ const (
 	// file doesn't set one. Must stay under the SQS clustering visibility
 	// override (900s) so a slow call can't outlive its message lease.
 	defaultRequestTimeout = 10 * time.Minute
-	// maxAttempts is the total number of tries per Prompt call (1 initial +
-	// retries). Retries only fire on 429/5xx/transport errors; the async
-	// handler's own re-enqueue retry sits above this.
-	maxAttempts = 4
+	// defaultAttempts is the total number of tries per Prompt call (1
+	// initial + retries) when New gets attempts ≤ 0. Retries only fire on
+	// 429/5xx/transport errors; the async handler's own re-enqueue retry sits
+	// above this.
+	defaultAttempts = 4
 	// maxRetryWait caps how long a single retry-after backoff can sleep, so a
 	// pathological header can't stall a worker slot.
 	maxRetryWait = 60 * time.Second
@@ -36,6 +37,9 @@ type anthropicService struct {
 	fallbackModel     string
 	fallbackMaxTokens int
 	client            *http.Client
+	// attempts is the total tries per call; 1 = no retry and no backoff
+	// (latency-bound callers like search, 05).
+	attempts int
 
 	// limitsLogged tracks which models have had their org rate limits logged
 	// (once per model per process) so prod logs reveal the actual Anthropic
@@ -44,10 +48,15 @@ type anthropicService struct {
 	limitsLogged map[string]struct{}
 }
 
-func New(apiKey, apiURL, apiVersion, fallbackModel string, fallbackMaxTokens, requestTimeoutSeconds int) *anthropicService {
+// New builds a client. attempts ≤ 0 uses the default (4 tries with
+// backoff); 1 makes a single try (callers bound latency with a ctx deadline).
+func New(apiKey, apiURL, apiVersion, fallbackModel string, fallbackMaxTokens, requestTimeoutSeconds, attempts int) *anthropicService {
 	timeout := defaultRequestTimeout
 	if requestTimeoutSeconds > 0 {
 		timeout = time.Duration(requestTimeoutSeconds) * time.Second
+	}
+	if attempts <= 0 {
+		attempts = defaultAttempts
 	}
 	return &anthropicService{
 		apiKey:            apiKey,
@@ -56,15 +65,30 @@ func New(apiKey, apiURL, apiVersion, fallbackModel string, fallbackMaxTokens, re
 		fallbackModel:     fallbackModel,
 		fallbackMaxTokens: fallbackMaxTokens,
 		client:            &http.Client{Timeout: timeout},
+		attempts:          attempts,
 		limitsLogged:      map[string]struct{}{},
 	}
 }
 
 type messagesRequest struct {
-	Model     string         `json:"model"`
-	Messages  []apiMessage   `json:"messages"`
-	System    []contentBlock `json:"system,omitempty"`
-	MaxTokens int            `json:"max_tokens"`
+	Model       string          `json:"model"`
+	Messages    []apiMessage    `json:"messages"`
+	System      []contentBlock  `json:"system,omitempty"`
+	MaxTokens   int             `json:"max_tokens"`
+	Temperature *float64        `json:"temperature,omitempty"`
+	Tools       []dto.ToolDef   `json:"tools,omitempty"`
+	ToolChoice  *toolChoice     `json:"tool_choice,omitempty"`
+	Thinking    *thinkingConfig `json:"thinking,omitempty"`
+}
+
+// toolChoice {type: "tool", name} forces one tool call.
+type toolChoice struct {
+	Type string `json:"type"`
+	Name string `json:"name,omitempty"`
+}
+
+type thinkingConfig struct {
+	Type string `json:"type"` // "disabled"
 }
 
 type apiMessage struct {
@@ -87,8 +111,10 @@ const maxCacheBreakpoints = 4
 
 type messagesResponse struct {
 	Content []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
+		Type  string          `json:"type"`
+		Text  string          `json:"text"`
+		Name  string          `json:"name"`
+		Input json.RawMessage `json:"input"`
 	} `json:"content"`
 	Model      string `json:"model"`
 	StopReason string `json:"stop_reason"`
@@ -120,10 +146,18 @@ func (s *anthropicService) Prompt(ctx context.Context, req dto.PromptRequest) (*
 	system, msgs := buildContent(req.Messages)
 
 	body := messagesRequest{
-		Model:     model,
-		Messages:  msgs,
-		System:    system,
-		MaxTokens: maxTokens,
+		Model:       model,
+		Messages:    msgs,
+		System:      system,
+		MaxTokens:   maxTokens,
+		Temperature: req.Temperature,
+		Tools:       req.Tools,
+	}
+	if req.ForceTool != "" {
+		body.ToolChoice = &toolChoice{Type: "tool", Name: req.ForceTool}
+	}
+	if req.DisableThinking {
+		body.Thinking = &thinkingConfig{Type: "disabled"}
 	}
 
 	payload, err := json.Marshal(body)
@@ -132,17 +166,21 @@ func (s *anthropicService) Prompt(ctx context.Context, req dto.PromptRequest) (*
 	}
 
 	var lastErr error
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		resp, retryable, err := s.doRequest(ctx, payload, model, attempt)
+	for attempt := 1; attempt <= s.attempts; attempt++ {
+		resp, retryable, retryAfter, err := s.doRequest(ctx, payload, model, attempt)
 		if err == nil {
 			return resp, nil
 		}
 		lastErr = err
-		if !retryable || ctx.Err() != nil {
-			return nil, lastErr
+		if !retryable || ctx.Err() != nil || attempt == s.attempts {
+			break
 		}
+		s.sleepBackoff(ctx, attempt, retryAfter)
 	}
-	return nil, fmt.Errorf("anthropic: giving up after %d attempts: %w", maxAttempts, lastErr)
+	if s.attempts == 1 {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("anthropic: giving up after %d attempts: %w", s.attempts, lastErr)
 }
 
 // buildContent converts DTO messages into the API's block-based shape.
@@ -185,13 +223,13 @@ func buildContent(messages []dto.Message) ([]contentBlock, []apiMessage) {
 	return system, msgs
 }
 
-// doRequest performs one HTTP attempt. On a retryable failure (429/529/5xx or
-// transport error) it sleeps the backoff itself (honoring retry-after and ctx
-// cancellation) before returning, so the caller loop can retry immediately.
-func (s *anthropicService) doRequest(ctx context.Context, payload []byte, model string, attempt int) (*dto.PromptResponse, bool, error) {
+// doRequest performs one HTTP attempt. It reports whether the failure is
+// retryable (429/529/5xx or transport error) and the server's retry-after;
+// the caller loop does the backoff, so a single-attempt client never sleeps.
+func (s *anthropicService) doRequest(ctx context.Context, payload []byte, model string, attempt int) (*dto.PromptResponse, bool, time.Duration, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, s.apiURL, bytes.NewReader(payload))
 	if err != nil {
-		return nil, false, fmt.Errorf("anthropic: failed to create request: %w", err)
+		return nil, false, 0, fmt.Errorf("anthropic: failed to create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("x-api-key", s.apiKey)
@@ -202,17 +240,15 @@ func (s *anthropicService) doRequest(ctx context.Context, payload []byte, model 
 		// Transport failure (timeout, connection reset). Retry with backoff
 		// unless the context itself is done.
 		if ctx.Err() != nil {
-			return nil, false, fmt.Errorf("anthropic: request failed: %w", err)
+			return nil, false, 0, fmt.Errorf("anthropic: request failed: %w", err)
 		}
-		s.sleepBackoff(ctx, attempt, 0)
-		return nil, true, fmt.Errorf("anthropic: request failed: %w", err)
+		return nil, true, 0, fmt.Errorf("anthropic: request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		s.sleepBackoff(ctx, attempt, 0)
-		return nil, true, fmt.Errorf("anthropic: failed to read response: %w", err)
+		return nil, true, 0, fmt.Errorf("anthropic: failed to read response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -242,21 +278,20 @@ func (s *anthropicService) doRequest(ctx context.Context, payload []byte, model 
 					"attempt", attempt,
 				)
 			}
-			s.sleepBackoff(ctx, attempt, retryAfter)
-			return nil, true, reqErr
+			return nil, true, retryAfter, reqErr
 		}
-		return nil, false, reqErr
+		return nil, false, 0, reqErr
 	}
 
 	s.logRateLimitsOnce(model, resp.Header)
 
 	var msgResp messagesResponse
 	if err := json.Unmarshal(respBody, &msgResp); err != nil {
-		return nil, false, fmt.Errorf("anthropic: failed to parse response: %w", err)
+		return nil, false, 0, fmt.Errorf("anthropic: failed to parse response: %w", err)
 	}
 
 	if len(msgResp.Content) == 0 {
-		return nil, false, fmt.Errorf("anthropic: no content returned")
+		return nil, false, 0, fmt.Errorf("anthropic: no content returned")
 	}
 
 	if msgResp.Usage.CacheReadInputTokens > 0 || msgResp.Usage.CacheCreationInputToken > 0 {
@@ -273,9 +308,15 @@ func (s *anthropicService) doRequest(ctx context.Context, payload []byte, model 
 	// those; fall back to the first block so responses without typed text
 	// blocks keep the old behavior.
 	content := ""
+	var toolUse *dto.ToolUse
 	for _, b := range msgResp.Content {
-		if b.Type == "text" {
+		switch b.Type {
+		case "text":
 			content += b.Text
+		case "tool_use":
+			if toolUse == nil {
+				toolUse = &dto.ToolUse{Name: b.Name, Input: b.Input}
+			}
 		}
 	}
 	if content == "" {
@@ -292,7 +333,8 @@ func (s *anthropicService) doRequest(ctx context.Context, payload []byte, model 
 		PromptTokens: msgResp.Usage.InputTokens + msgResp.Usage.CacheCreationInputToken,
 		OutputTokens: msgResp.Usage.OutputTokens,
 		StopReason:   msgResp.StopReason,
-	}, false, nil
+		ToolUse:      toolUse,
+	}, false, 0, nil
 }
 
 // logRateLimitsOnce logs the org's Anthropic rate limits the first time each

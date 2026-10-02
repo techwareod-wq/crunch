@@ -8,6 +8,7 @@ import (
 	"github.com/atharva-ng/crunch/internal/tokentracker"
 
 	"github.com/atharva-ng/crunch/internal/services/accountService"
+	"github.com/atharva-ng/crunch/internal/services/aiSearchService"
 	"github.com/atharva-ng/crunch/internal/services/attributeService"
 	"github.com/atharva-ng/crunch/internal/services/catalogService"
 	"github.com/atharva-ng/crunch/internal/services/searchService"
@@ -41,6 +42,7 @@ type InternalServices struct {
 	AttributeService attributeService.AttributeService
 	CatalogService   catalogService.CatalogService
 	SearchService    searchService.SearchService
+	AISearchService  aiSearchService.AISearchService
 }
 
 type AppContext struct {

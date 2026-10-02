@@ -434,3 +434,30 @@ func ListNeedsInfoWarehouses(ctx context.Context, key string, page, limit int) (
 		SetProjection(bson.M{"live": 0, "embedding": 0}))
 	return items, total, err
 }
+
+// SetWarehouseEmbedding stores a listing's embedding when its live version is
+// still liveVersion (a newer approve brings its own job); false = skipped.
+func SetWarehouseEmbedding(ctx context.Context, id primitive.ObjectID, liveVersion int, vec []float32, hash string) (bool, error) {
+	res, err := warehouses().UpdateOne(ctx, bson.M{"_id": id, "live_version": liveVersion},
+		bson.M{"$set": bson.M{"embedding": vec, "embedding_hash": hash}})
+	if err != nil {
+		return false, err
+	}
+	return res.MatchedCount == 1, nil
+}
+
+// LiveWarehouseRef is a live listing's id and version (reembed-all paging).
+type LiveWarehouseRef struct {
+	ID          primitive.ObjectID `bson:"_id"`
+	LiveVersion int                `bson:"live_version"`
+}
+
+// ListLiveWarehouseRefs pages live listings by _id after after.
+func ListLiveWarehouseRefs(ctx context.Context, after primitive.ObjectID, limit int) ([]LiveWarehouseRef, error) {
+	f := bson.M{"status": WarehouseLive}
+	if !after.IsZero() {
+		f["_id"] = bson.M{"$gt": after}
+	}
+	return findAllDocs[LiveWarehouseRef](ctx, warehouses(), f, options.Find().
+		SetSort(bson.D{{Key: "_id", Value: 1}}).SetLimit(int64(limit)).SetProjection(bson.M{"_id": 1, "live_version": 1}))
+}

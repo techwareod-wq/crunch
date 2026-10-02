@@ -12,6 +12,7 @@ import (
 	"github.com/atharva-ng/crunch/internal/models"
 	"github.com/atharva-ng/crunch/internal/pipeline"
 	"github.com/atharva-ng/crunch/internal/providers/interfaces"
+	"github.com/atharva-ng/crunch/internal/services/aiSearchService"
 	"github.com/atharva-ng/crunch/internal/services/catalogService"
 	"github.com/atharva-ng/crunch/internal/services/catalogService/dto"
 	"github.com/atharva-ng/crunch/internal/services/catalogService/store"
@@ -26,6 +27,9 @@ type svc struct {
 	geocoder func() interfaces.Geocoder
 	dispatch func(ctx context.Context, pt pipeline.ProcessType, key string, payload any) error
 	cfg      func() config.CatalogValues
+	// aiSearch is the AI search feature flag: approve queues embed jobs
+	// only while it's on.
+	aiSearch func() bool
 	now      func() time.Time
 
 	media  *mediaService
@@ -420,10 +424,15 @@ func (s *svc) finishApprove(ctx context.Context, actor domain.Actor, w *models.W
 			log.Error("catalog: rent upsert failed", "warehouse", w.ID.Hex(), "error", err)
 		}
 	}
-	// 6. Catalog version (map cache key, 04). The embedding job (05)
-	// dispatches from here once aisearch lands.
+	// 6. Catalog version (map cache key, 04) and the embedding job (05).
 	if _, err := s.store.BumpCatalogVersion(ctx); err != nil {
 		log.Error("catalog: catalogVersion bump failed", "error", err)
+	}
+	if s.aiSearch() {
+		if err := s.dispatch(ctx, aiSearchService.ProcessEmbed, aiSearchService.EmbedKey(w.ID.Hex(), r.Version, ""),
+			aiSearchService.EmbedPayload{WarehouseID: w.ID.Hex(), LiveVersion: r.Version}); err != nil {
+			log.Error("catalog: embed dispatch failed — the next reembed-all catches up", "warehouse", w.ID.Hex(), "error", err)
+		}
 	}
 	// 7. Audit: old live → new live.
 	action, meta := domain.ActionApprove, map[string]any{"revisionId": r.ID.Hex(), "version": r.Version}

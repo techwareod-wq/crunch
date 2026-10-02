@@ -25,6 +25,12 @@ func EnsureWarehouseSearchIndexes(ctx context.Context) error {
 		{Keys: bson.D{{Key: "fit", Value: 1}}},
 		{Keys: bson.D{{Key: "nums.k", Value: 1}, {Key: "nums.v", Value: 1}}},
 		{Keys: bson.D{{Key: "status", Value: 1}, {Key: "price.per_sqm_month", Value: 1}}},
+		// Keyword fallback when the AI parser is down (05). One text index
+		// per collection.
+		{Keys: bson.D{{Key: "name", Value: "text"}, {Key: "city", Value: "text"}, {Key: "locality", Value: "text"},
+			{Key: "live.attributes.warehouse.fields.description.v", Value: "text"}},
+			Options: options.Index().SetName("wh_text").SetDefaultLanguage("none").
+				SetWeights(bson.D{{Key: "name", Value: 5}, {Key: "city", Value: 2}, {Key: "locality", Value: 2}})},
 	}); err != nil {
 		return fmt.Errorf("ensure warehouses search indexes: %w", err)
 	}
@@ -69,13 +75,14 @@ type NumCond struct {
 	Gte, Lte *float64
 }
 
-func rangeOf(gte, lte *float64) bson.M {
-	r := bson.M{}
+// rangeOf is an ordered {$gte, $lte} (stable query shape).
+func rangeOf(gte, lte *float64) bson.D {
+	r := bson.D{}
 	if gte != nil {
-		r["$gte"] = *gte
+		r = append(r, bson.E{Key: "$gte", Value: *gte})
 	}
 	if lte != nil {
-		r["$lte"] = *lte
+		r = append(r, bson.E{Key: "$lte", Value: *lte})
 	}
 	return r
 }
@@ -111,7 +118,7 @@ func SearchMatch(q SearchQuery) bson.M {
 	for _, r := range q.Ranges {
 		conds := bson.A{}
 		for _, c := range r.Conds {
-			conds = append(conds, bson.M{"nums": bson.M{"$elemMatch": bson.M{"k": c.K, "v": rangeOf(c.Gte, c.Lte)}}})
+			conds = append(conds, bson.M{"nums": bson.M{"$elemMatch": bson.D{{Key: "k", Value: c.K}, {Key: "v", Value: rangeOf(c.Gte, c.Lte)}}}})
 		}
 		var known bson.M
 		if len(conds) == 1 {
@@ -432,6 +439,48 @@ func NearestLiveWarehouses(ctx context.Context, near GeoPoint, limit int, exclud
 	match := SearchMatch(SearchQuery{Exclude: exclude})
 	cur, err := warehouses().Aggregate(ctx, mongo.Pipeline{
 		{{Key: "$geoNear", Value: bson.M{"near": near, "key": "loc", "distanceField": "dist_m", "query": match, "spherical": true}}},
+		{{Key: "$limit", Value: limit}},
+		{{Key: "$project", Value: hitProjection}},
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := []SearchHit{}
+	err = cur.All(ctx, &out)
+	return out, err
+}
+
+// VectorSearchWarehouses runs Atlas Vector Search over live listings in
+// country (05 similar matches). Atlas only: plain mongod has no
+// $vectorSearch.
+func VectorSearchWarehouses(ctx context.Context, index string, vec []float32, numCandidates, limit int, country string) ([]SearchHit, error) {
+	filter := bson.M{"status": WarehouseLive}
+	if country != "" {
+		filter["country"] = country
+	}
+	cur, err := warehouses().Aggregate(ctx, mongo.Pipeline{
+		{{Key: "$vectorSearch", Value: bson.M{"index": index, "path": "embedding", "queryVector": vec,
+			"numCandidates": numCandidates, "limit": limit, "filter": filter}}},
+		{{Key: "$project", Value: hitProjection}},
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := []SearchHit{}
+	err = cur.All(ctx, &out)
+	return out, err
+}
+
+// TextSearchWarehouses is the keyword fallback: $text over name, city,
+// locality and description of live listings in country, best first.
+func TextSearchWarehouses(ctx context.Context, text, country string, limit int) ([]SearchHit, error) {
+	match := bson.M{"$text": bson.M{"$search": text}, "status": WarehouseLive}
+	if country != "" {
+		match["country"] = country
+	}
+	cur, err := warehouses().Aggregate(ctx, mongo.Pipeline{
+		{{Key: "$match", Value: match}},
+		{{Key: "$sort", Value: bson.M{"score": bson.M{"$meta": "textScore"}}}},
 		{{Key: "$limit", Value: limit}},
 		{{Key: "$project", Value: hitProjection}},
 	})

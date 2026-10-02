@@ -36,6 +36,21 @@ func Invalidf(format string, a ...any) error {
 type Viewer struct {
 	UserID string
 	Staff  bool
+	// Quiet skips the search log: AI search (05) logs its own, richer event.
+	Quiet bool
+}
+
+// FallbackQuery bounds the similar / keyword matches.
+type FallbackQuery struct {
+	Country string
+	// Near drops matches beyond the last radius ring (nil = no location).
+	Near *domain.LatLng
+	// Exclude lists shortIds already shown.
+	Exclude []string
+	Limit   int
+	// VectorIndex / NumCandidates tune $vectorSearch (Similar only).
+	VectorIndex   string
+	NumCandidates int
 }
 
 // SearchService runs structured search.
@@ -53,6 +68,13 @@ type SearchService interface {
 	Catalog(country string) (dto.PublicCatalog, string)
 	// Resolve geocodes a typed postal code / place (map centring).
 	Resolve(ctx context.Context, q, country string) (dto.GeoResolved, error)
+
+	// Similar returns listings nearest to vec by meaning (Atlas Vector
+	// Search, D-084); Keyword the best $text matches for text (AI parser
+	// down, D-088). Both keep to live listings in q.Country, within the last
+	// radius ring of q.Near, and skip q.Exclude.
+	Similar(ctx context.Context, vec []float32, q FallbackQuery) ([]domain.SearchCard, error)
+	Keyword(ctx context.Context, text string, q FallbackQuery) ([]domain.SearchCard, error)
 
 	// SetLogger wires analytics (07); nil = no logging.
 	SetLogger(l domain.SearchLogger)

@@ -16,6 +16,7 @@ import (
 	"github.com/atharva-ng/crunch/internal/models"
 	"github.com/atharva-ng/crunch/internal/pipeline"
 	"github.com/atharva-ng/crunch/internal/providers/interfaces"
+	"github.com/atharva-ng/crunch/internal/services/aiSearchService"
 	"github.com/atharva-ng/crunch/internal/services/catalogService"
 	"github.com/atharva-ng/crunch/internal/warehousehub/changelog"
 	"github.com/atharva-ng/crunch/internal/warehousehub/domain"
@@ -91,16 +92,17 @@ type sentMsg struct {
 }
 
 type harness struct {
-	store  *memStore
-	cl     *changelog.Memory
-	geo    *fakeGeocoder
-	s3     *fakeS3
-	cfg    config.CatalogValues
-	svc    *svc
-	media  *mediaService
-	public *publicSite
-	sent   []sentMsg
-	clock  time.Time
+	store    *memStore
+	cl       *changelog.Memory
+	geo      *fakeGeocoder
+	s3       *fakeS3
+	cfg      config.CatalogValues
+	svc      *svc
+	media    *mediaService
+	public   *publicSite
+	sent     []sentMsg
+	clock    time.Time
+	aiSearch bool
 }
 
 func newHarness() *harness {
@@ -120,7 +122,7 @@ func newHarness() *harness {
 			h.sent = append(h.sent, sentMsg{pt, key, p})
 			return nil
 		},
-		cfg: func() config.CatalogValues { return h.cfg }, now: now,
+		cfg: func() config.CatalogValues { return h.cfg }, aiSearch: func() bool { return h.aiSearch }, now: now,
 	}
 	h.media = &mediaService{
 		store: h.store, s3: func() interfaces.S3 { return h.s3 },
@@ -709,5 +711,28 @@ func TestStoredValuesRoundTripJSON(t *testing.T) {
 	}
 	if strings.Contains(js, `"Key"`) || strings.Contains(js, "postal_code") {
 		t.Errorf("BSON shape leaked into JSON: %s", js)
+	}
+}
+
+func TestApproveEmbedFollowsAISearchFlag(t *testing.T) {
+	embeds := func(h *harness) int {
+		n := 0
+		for _, m := range h.sent {
+			if m.pt == aiSearchService.ProcessEmbed {
+				n++
+			}
+		}
+		return n
+	}
+	h := newHarness()
+	h.live(t)
+	if n := embeds(h); n != 0 {
+		t.Errorf("flag off: %d embed jobs", n)
+	}
+	h = newHarness()
+	h.aiSearch = true
+	w, _ := h.live(t)
+	if n := embeds(h); n != 1 || h.sent[len(h.sent)-1].key != aiSearchService.EmbedKey(w.ID.Hex(), 1, "") {
+		t.Errorf("flag on: %d embed jobs, sent %+v", n, h.sent)
 	}
 }

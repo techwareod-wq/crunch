@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/atharva-ng/crunch/cmd/service/controllers/admin"
+	"github.com/atharva-ng/crunch/cmd/service/controllers/aisearch"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/attributes"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/catalog"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/healthcheck"
@@ -120,4 +121,5 @@ func loadAppAPIs(appCtx *config.AppContext) {
 	attributes.Handle(appCtx)
 	catalog.Handle(appCtx)
 	search.Handle(appCtx)
+	aisearch.Handle(appCtx)
 }

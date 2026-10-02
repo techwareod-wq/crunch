@@ -17,6 +17,8 @@ type Store interface {
 	MapPoints(ctx context.Context, q models.SearchQuery, near *models.GeoPoint, maxMeters float64) ([]models.MapPoint, error)
 	Nearest(ctx context.Context, near models.GeoPoint, limit int, exclude primitive.ObjectID) ([]models.SearchHit, error)
 	CatalogVersion(ctx context.Context) (int64, error)
+	Vector(ctx context.Context, index string, vec []float32, numCandidates, limit int, country string) ([]models.SearchHit, error)
+	Text(ctx context.Context, text, country string, limit int) ([]models.SearchHit, error)
 
 	GetGeocode(ctx context.Context, key string, now time.Time) (*models.GeocodeCacheEntry, error)
 	PutGeocode(ctx context.Context, e models.GeocodeCacheEntry) error
@@ -81,4 +83,12 @@ func (s *store) PincodesByPlace(ctx context.Context, name string, limit int) ([]
 
 func (s *store) PincodesByDistrict(ctx context.Context, name string, limit int) ([]models.Pincode, error) {
 	return models.FindPincodesByDistrict(ctx, name, limit)
+}
+
+func (s *store) Vector(ctx context.Context, index string, vec []float32, numCandidates, limit int, country string) ([]models.SearchHit, error) {
+	return models.VectorSearchWarehouses(ctx, index, vec, numCandidates, limit, country)
+}
+
+func (s *store) Text(ctx context.Context, text, country string, limit int) ([]models.SearchHit, error) {
+	return models.TextSearchWarehouses(ctx, text, country, limit)
 }

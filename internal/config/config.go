@@ -78,8 +78,10 @@ type MapsConfig struct {
 
 type LLMConfig struct {
 	AnthropicAPIKey string
-	OpenAIAPIKey    string
-	GeminiAPIKey    string
+	// VoyageAPIKey enables embeddings (AI search similar matches, D-082).
+	VoyageAPIKey string
+	OpenAIAPIKey string
+	GeminiAPIKey string
 }
 
 type SQSConfig struct {
@@ -205,6 +207,7 @@ func (c *AppConfig) LoadLLMConfig() {
 	c.LLM.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")
 	c.LLM.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
 	c.LLM.GeminiAPIKey = os.Getenv("GEMINI_API_KEY")
+	c.LLM.VoyageAPIKey = os.Getenv("VOYAGE_API_KEY")
 }
 
 func (c *AppConfig) LoadMapsConfig() {

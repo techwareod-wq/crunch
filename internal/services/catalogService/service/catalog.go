@@ -48,8 +48,9 @@ func NewService(
 			}
 			return dispatcher.DispatchKeyed(ctx, string(pt), systemUserID, key, payload)
 		},
-		cfg: cfg,
-		now: time.Now,
+		cfg:      cfg,
+		aiSearch: func() bool { return values.AISearch.Enabled },
+		now:      time.Now,
 	}
 	s.media = &mediaService{
 		store: st,
