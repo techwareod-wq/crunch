@@ -167,7 +167,7 @@ func (m *mediaService) Link(ctx context.Context, id primitive.ObjectID) (string,
 		return "", err
 	}
 	if md.Visibility == models.VisibilityPublic {
-		return publicURL(m.aws().PublicMediaBaseURL, md.Key), nil
+		return domain.PublicMediaURL(m.aws().PublicMediaBaseURL, md.Key), nil
 	}
 	s3 := m.s3()
 	if s3 == nil {
@@ -178,14 +178,6 @@ func (m *mediaService) Link(ctx context.Context, id primitive.ObjectID) (string,
 		ttl = 300
 	}
 	return s3.PresignedGetObject(ctx, md.Bucket, md.Key, int64(ttl))
-}
-
-// publicURL is the CloudFront URL of a public object.
-func publicURL(base, key string) string {
-	if base == "" || key == "" {
-		return ""
-	}
-	return base + "/" + key
 }
 
 func cleanFilename(name string) string {

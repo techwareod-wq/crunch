@@ -131,3 +131,22 @@ warehousehub:
     publicPageSize: 1000
     # Max revisions per bulk-approve request.
     bulkApproveMax: 100
+  search:
+    # Default radius per country (D-070) and the expansion rings in km (D-071).
+    defaultRadiusKm:
+      IN: 25
+      default: 25
+    radiusSteps: [25, 50, 100, 250]
+    # Stop expanding once a ring holds this many listings.
+    minResults: 3
+    pageLimitDefault: 20
+    pageLimitMax: 50
+    # Price filter currency per country (no FX, D-058).
+    currency:
+      IN: INR
+    # Resolved locations are reused this long (D-078). TODO: verify Google's
+    # caching terms before launch.
+    geocodeCacheHours: 720
+    # Geocoder circuit breaker.
+    breakerFailures: 5
+    breakerOpenSeconds: 60

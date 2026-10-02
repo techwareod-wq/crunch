@@ -100,7 +100,7 @@ func BuildPublicListing(snap *domain.Snapshot, w *models.Warehouse, media []mode
 		l.TotalArea = &area
 	}
 	if rent, ok := rootValue[models.Money](a, fieldRent); ok && public(fieldRent) {
-		l.Rate = publicRate(rent, w.Price)
+		l.Rate = domain.NewPublicRate(rent, w.Price)
 	}
 
 	// Attributes: public yes nodes, nested.
@@ -142,7 +142,7 @@ func BuildPublicListing(snap *domain.Snapshot, w *models.Warehouse, media []mode
 		if !ok || m.Status != models.MediaReady || m.Visibility != models.VisibilityPublic {
 			continue
 		}
-		l.Media = append(l.Media, dto.PublicMedia{Kind: m.Kind, DocType: m.DocType, URL: publicURL(mediaBase, m.Key), Caption: ref.Caption, IsCover: ref.IsCover})
+		l.Media = append(l.Media, dto.PublicMedia{Kind: m.Kind, DocType: m.DocType, URL: domain.PublicMediaURL(mediaBase, m.Key), Caption: ref.Caption, IsCover: ref.IsCover})
 	}
 	slices.SortStableFunc(l.Media, func(x, y dto.PublicMedia) int {
 		switch {
@@ -201,17 +201,6 @@ func publicFields(n *models.AttributeNode, a models.Attributes, res domain.Resul
 		out = append(out, pf)
 	}
 	return out
-}
-
-func publicRate(m models.Money, price *models.Price) *domain.PublicRate {
-	r := &domain.PublicRate{Amount: m.Amount, Currency: m.Currency, Basis: m.Basis, OnRequest: m.OnRequest}
-	if m.OnRequest {
-		r.Amount, r.Basis = 0, ""
-	}
-	if price != nil {
-		r.PerSqmMonth, r.Approx = price.PerSqmMonth, price.Approx
-	}
-	return r
 }
 
 func buildSEO(l dto.PublicListing, siteBase string) dto.PublicSEO {
@@ -300,7 +289,7 @@ func (p *publicSite) Slugs(ctx context.Context, page int, withCover bool) ([]dto
 	for _, w := range ws {
 		it := dto.SlugItem{Slug: w.Slug, UpdatedAt: w.UpdatedAt}
 		if withCover {
-			it.CoverURL = publicURL(p.mediaBase(), w.CoverKey)
+			it.CoverURL = domain.PublicMediaURL(p.mediaBase(), w.CoverKey)
 		}
 		out = append(out, it)
 	}

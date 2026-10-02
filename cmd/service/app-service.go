@@ -12,6 +12,7 @@ import (
 	"github.com/atharva-ng/crunch/cmd/service/controllers/attributes"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/catalog"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/healthcheck"
+	"github.com/atharva-ng/crunch/cmd/service/controllers/search"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/users"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/webhooks"
 	"github.com/atharva-ng/crunch/cmd/service/providers"
@@ -118,4 +119,5 @@ func loadAppAPIs(appCtx *config.AppContext) {
 	admin.Handle(appCtx)
 	attributes.Handle(appCtx)
 	catalog.Handle(appCtx)
+	search.Handle(appCtx)
 }

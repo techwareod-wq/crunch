@@ -44,6 +44,50 @@ type WarehouseHubValues struct {
 	Attributes AttributesValues `yaml:"attributes"`
 	// Catalog tunes listings, review and media (spec 03).
 	Catalog CatalogValues `yaml:"catalog"`
+	// Search tunes structured search and the map (spec 04).
+	Search SearchValues `yaml:"search"`
+}
+
+// SearchValues is the `warehousehub.search` block.
+type SearchValues struct {
+	// DefaultRadiusKm per country (D-070); "default" applies elsewhere.
+	DefaultRadiusKm map[string]int `yaml:"defaultRadiusKm"`
+	// RadiusSteps are the expansion rings in km, ascending (D-071). The
+	// last step is the search's maximum reach.
+	RadiusSteps []int `yaml:"radiusSteps"`
+	// MinResults stops the expansion once a ring holds this many (D-071).
+	MinResults int `yaml:"minResults"`
+	// PageLimitDefault / PageLimitMax bound one results page.
+	PageLimitDefault int `yaml:"pageLimitDefault"`
+	PageLimitMax     int `yaml:"pageLimitMax"`
+	// Currency per country for price filters (no FX, D-058).
+	Currency map[string]string `yaml:"currency"`
+	// GeocodeCacheHours is how long a resolved location is reused (D-078;
+	// verify Google's caching terms before launch).
+	GeocodeCacheHours int `yaml:"geocodeCacheHours"`
+	// Geocoder circuit breaker: open after BreakerFailures consecutive
+	// failures, for BreakerOpenSeconds.
+	BreakerFailures    int `yaml:"breakerFailures"`
+	BreakerOpenSeconds int `yaml:"breakerOpenSeconds"`
+}
+
+// RadiusFor returns the default radius for country.
+func (v SearchValues) RadiusFor(country string) int {
+	if r, ok := v.DefaultRadiusKm[country]; ok && r > 0 {
+		return r
+	}
+	if r := v.DefaultRadiusKm["default"]; r > 0 {
+		return r
+	}
+	return 25
+}
+
+// CurrencyFor returns the price currency for country.
+func (v SearchValues) CurrencyFor(country string) string {
+	if c := v.Currency[country]; c != "" {
+		return c
+	}
+	return "INR"
 }
 
 // CatalogValues is the `warehousehub.catalog` block.

@@ -78,6 +78,28 @@ type PublicRate struct {
 	OnRequest   bool    `json:"onRequest"`
 }
 
+// NewPublicRate is the public view of the headline rent m with its
+// normalized price.
+func NewPublicRate(m models.Money, price *models.Price) *PublicRate {
+	r := &PublicRate{Amount: m.Amount, Currency: m.Currency, Basis: m.Basis, OnRequest: m.OnRequest}
+	if m.OnRequest {
+		r.Amount, r.Basis = 0, ""
+	}
+	if price != nil {
+		r.PerSqmMonth, r.Approx = price.PerSqmMonth, price.Approx
+	}
+	return r
+}
+
+// PublicMediaURL is the CloudFront URL of a public object ("" when either
+// part is missing).
+func PublicMediaURL(base, key string) string {
+	if base == "" || key == "" {
+		return ""
+	}
+	return base + "/" + key
+}
+
 // SearchEngine is what the catalog needs from search (04): the nearest live
 // listings for an archived listing's 410 page. Wired in cmd/service once
 // search lands; nil means "no nearby list".

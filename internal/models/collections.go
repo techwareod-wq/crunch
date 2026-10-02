@@ -14,4 +14,6 @@ const (
 	warehouseRevisionsCollection = "warehouse_revisions"
 	warehouseMediaCollection     = "warehouse_media"
 	warehouseRentsCollection     = "warehouse_rents"
+	geocodeCacheCollection       = "geocode_cache"
+	pincodesCollection           = "pincodes"
 )

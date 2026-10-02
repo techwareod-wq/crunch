@@ -22,6 +22,8 @@ import (
 	attributestore "github.com/atharva-ng/crunch/internal/services/attributeService/store"
 	catalogsvc "github.com/atharva-ng/crunch/internal/services/catalogService/service"
 	catalogstore "github.com/atharva-ng/crunch/internal/services/catalogService/store"
+	searchsvc "github.com/atharva-ng/crunch/internal/services/searchService/service"
+	searchstore "github.com/atharva-ng/crunch/internal/services/searchService/store"
 	usersvc "github.com/atharva-ng/crunch/internal/services/userservice/service"
 	userstore "github.com/atharva-ng/crunch/internal/services/userservice/store"
 	"github.com/atharva-ng/crunch/internal/tokentracker"
@@ -124,7 +126,8 @@ var llmProcessTypes []pipeline.ProcessType
 
 // InjectDefaultServices wires the services: users, the account-deletion
 // cascade and the WarehouseHub services (attributes, then catalog, which
-// evaluates with the attribute rules).
+// evaluates with the attribute rules, then search, which also serves the
+// catalog's 410 nearby list).
 func InjectDefaultServices(appCtx *config.AppContext) error {
 	appCtx.InternalServices.UserService = usersvc.NewService(userstore.NewStore())
 
@@ -154,6 +157,15 @@ func InjectDefaultServices(appCtx *config.AppContext) error {
 		appCtx.Config.Values.Storage,
 		appCtx.Config.Values.WarehouseHub,
 	)
+	search := searchsvc.NewService(
+		searchstore.NewStore(),
+		attributes.Rules(),
+		appCtx.Geocoder,
+		appCtx.Config.Values.WarehouseHub,
+		appCtx.Config.AWS,
+	)
+	appCtx.InternalServices.SearchService = search
+	appCtx.InternalServices.CatalogService.SetSearchEngine(search)
 	log.Info("Injected WarehouseHub services")
 
 	return nil
