@@ -39,6 +39,36 @@ func HandleAdminWhoami(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// staffMember is one panel user in the staff list.
+type staffMember struct {
+	ID          string   `json:"id"`
+	Email       string   `json:"email"`
+	Name        string   `json:"name"`
+	Role        string   `json:"role"`
+	Permissions []string `json:"permissions"`
+}
+
+// listStaff is a seam for tests.
+var listStaff = models.ListStaff
+
+// HandleAdminListStaff serves GET /v1/admin/staff (any admin): every panel
+// user with their effective permissions, for pickers such as the enquiry
+// assignee (the backend still checks the assignee holds editor).
+func HandleAdminListStaff(w http.ResponseWriter, r *http.Request) {
+	users, err := listStaff(r.Context())
+	if err != nil {
+		middleware.GetLogger(r).Error("admin staff list failed", "error", err)
+		middleware.SendJSONError(w, r, apperrors.ErrAdminCheckFailed)
+		return
+	}
+	items := make([]staffMember, 0, len(users))
+	for i := range users {
+		u := &users[i]
+		items = append(items, staffMember{ID: u.ID.Hex(), Email: u.Email, Name: u.Name, Role: u.Role, Permissions: authz.Effective(u)})
+	}
+	middleware.SendJSONResponse(w, r, http.StatusOK, map[string]any{"items": items})
+}
+
 // listAuditResponse pages the persisted audit trail, mirroring the users
 // list shape.
 type listAuditResponse struct {

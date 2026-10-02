@@ -37,3 +37,4 @@ Thumbs.db
 CLAUDE.md
 # Debug
 __debug_bin*
+.gstack/

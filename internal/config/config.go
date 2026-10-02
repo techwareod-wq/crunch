@@ -139,6 +139,18 @@ func (c *AppConfig) LoadServerConfig() {
 	}
 }
 
+// LoadSiteConfig lets the deploy set the public site / admin panel origins
+// (PUBLIC_BASE_URL, ADMIN_BASE_URL) over the values.yaml defaults. They feed
+// listing links in the enquiry inbox and the listing JSON-LD url.
+func (c *AppConfig) LoadSiteConfig() {
+	if v := strings.TrimSpace(os.Getenv("PUBLIC_BASE_URL")); v != "" {
+		c.Values.WarehouseHub.PublicBaseURL = strings.TrimRight(v, "/")
+	}
+	if v := strings.TrimSpace(os.Getenv("ADMIN_BASE_URL")); v != "" {
+		c.Values.WarehouseHub.AdminBaseURL = strings.TrimRight(v, "/")
+	}
+}
+
 // atoiEnv reads an integer env override. An unset (empty) var returns 0 so the
 // caller falls back to its YAML default. A set-but-malformed value is logged
 // and also treated as 0 (fall back to the default) rather than silently
@@ -291,6 +303,7 @@ func LoadConfigFromEnv(c *AppConfig) error {
 	}
 	c.LoadDatabaseConfig()
 	c.LoadServerConfig()
+	c.LoadSiteConfig()
 	c.LoadClerkConfig()
 	c.LoadAWSConfig()
 	c.LoadLLMConfig()

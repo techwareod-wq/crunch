@@ -14,7 +14,7 @@ import (
 // before the permission check) and is tagged with what it needs on top of
 // panel access (internal/authz):
 //
-//   - whoami: any admin
+//   - whoami, staff list: any admin
 //   - audit trail + change log: approver
 //   - users, access, deletion, cron: superuser
 //
@@ -36,6 +36,7 @@ func Handle(appCtx *config.AppContext) {
 
 	// --- console ---
 	route("/v1/admin/whoami", HandleAdminWhoami, http.MethodGet, nil)
+	route("/v1/admin/staff", HandleAdminListStaff, http.MethodGet, nil)
 	route("/v1/admin/audit", HandleAdminListAuditActions, http.MethodGet, nil, authz.PermApprover)
 
 	// --- WarehouseHub change log (D-014): full before/after docs ---

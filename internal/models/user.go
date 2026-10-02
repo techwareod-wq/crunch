@@ -144,6 +144,22 @@ func FindUserByEmail(ctx context.Context, email string) (bool, *User, error) {
 	return true, &user, nil
 }
 
+// ListStaff returns every active panel user (role admin or superuser),
+// sorted by email. The staff set is small, so there is no paging; it feeds the
+// enquiry assignee picker.
+func ListStaff(ctx context.Context) ([]User, error) {
+	filter := activeFilter(bson.M{"role": bson.M{"$in": []string{RoleAdmin, RoleSuperuser}}})
+	cur, err := Collection(usersCollection).Find(ctx, filter, options.Find().SetSort(bson.D{{Key: fieldEmail, Value: 1}}))
+	if err != nil {
+		return nil, err
+	}
+	users := []User{}
+	if err := cur.All(ctx, &users); err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
 // ListUsers returns one page of active users (newest first) plus the total
 // match count, for the admin dashboard's landing table. page is 1-based.
 // query, when non-empty, is matched case-insensitively against email and name
