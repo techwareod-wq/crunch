@@ -13,14 +13,13 @@ const (
 	EntityAttributeDef ChangeEntity = "attributeDef"
 	EntityIndustry     ChangeEntity = "industry"
 	EntityEnquiry      ChangeEntity = "enquiry"
-	EntityStaff        ChangeEntity = "staff"
 )
 
 // KnownEntity reports whether e is one of the ChangeEntity constants.
 func KnownEntity(e string) bool {
 	switch ChangeEntity(e) {
 	case EntityWarehouse, EntityRevision, EntityRent, EntityMedia,
-		EntityAttributeDef, EntityIndustry, EntityEnquiry, EntityStaff:
+		EntityAttributeDef, EntityIndustry, EntityEnquiry:
 		return true
 	}
 	return false

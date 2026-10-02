@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/atharva-ng/crunch/cmd/service/controllers/admin"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/healthcheck"
@@ -15,7 +14,6 @@ import (
 	"github.com/atharva-ng/crunch/cmd/service/providers"
 	"github.com/atharva-ng/crunch/internal/config"
 	"github.com/atharva-ng/crunch/internal/middleware"
-	"github.com/atharva-ng/crunch/internal/models"
 	"github.com/atharva-ng/crunch/internal/modules"
 	"github.com/atharva-ng/crunch/internal/util/log"
 )
@@ -36,18 +34,6 @@ func main() {
 	// Pin the accepted Host headers (production: the public API host) so requests
 	// sent directly to the server's IP are rejected. Empty list = unrestricted.
 	middleware.SetAllowedHosts(appCtx.Config.Server.AllowedHosts)
-
-	// Role catalog for the admin authorization gate (boot-loaded by the
-	// providers).
-	middleware.SetRolesCache(appCtx.RolesCache)
-
-	// Staff invites (D-011): a JWT-auto-created user picks up a pending
-	// invite's role on first sign-in (the Clerk webhook is the other path).
-	middleware.SetUserCreatedHook(func(ctx context.Context, u *models.User) {
-		if err := appCtx.InternalServices.StaffInvites.Apply(ctx, u, "jwt"); err != nil {
-			log.Error("staff invite apply on JWT auto-create failed — the webhook path will retry", "user_id", u.ID.Hex(), "error", err)
-		}
-	})
 
 	loadAppAPIs(appCtx, mods)
 
@@ -75,10 +61,12 @@ func main() {
 	appCtx.TokenTracker.Start()
 	defer appCtx.TokenTracker.Stop()
 
-	// Periodic role-catalog refresh: bounds staleness for a process that
-	// didn't serve an admin role write (rolling deploys run two).
-	cacheRefresh := time.Duration(appCtx.Config.Values.Admin.CacheRefreshSeconds) * time.Second
-	appCtx.RolesCache.StartRefresh(ctx, cacheRefresh)
+	// Module boot state (e.g. the attributes rules snapshot) must be loaded
+	// before the async handlers start consuming.
+	if err := modules.Start(ctx, mods); err != nil {
+		log.Error("failed to start modules", "error", err)
+		os.Exit(1)
+	}
 
 	// Start primary async handler in background.
 	go func() {

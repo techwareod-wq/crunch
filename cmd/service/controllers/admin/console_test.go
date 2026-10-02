@@ -55,9 +55,6 @@ func TestHandleAdminWhoami_ReturnsActingAdminIdentity(t *testing.T) {
 	}))
 
 	rec := httptest.NewRecorder()
-	// whoami now resolves permissions/rank from the AppContext's roles cache;
-	// inject one via the appctx middleware (a nil cache resolves nothing, which
-	// is fine — this test only asserts identity fields).
 	(&config.AppContext{}).Middleware()(http.HandlerFunc(HandleAdminWhoami)).ServeHTTP(rec, r)
 
 	if rec.Code != http.StatusOK {

@@ -9,19 +9,15 @@ server:
   #     - "api.crunch.example"
   allowedHosts: []
 
-# Operational tuning for the /v1/admin surface. Access is granted solely by
-# DB-backed RBAC roles (rolesmigrate seeds them); nothing here grants admin.
+# Operational tuning for the /v1/admin surface. Access comes only from a
+# user's role + permissions (internal/authz); nothing here grants admin.
 admin:
-  # Interval for the roles cache DB refresh (StartRefresh).
-  cacheRefreshSeconds: 60
   # Page-size bounds for the admin list endpoints.
   pagination:
     usersDefault: 20
     usersMax: 100
     auditDefault: 50
     auditMax: 200
-  # Staff invites (D-011): days an invite stays usable (also Clerk's expiry).
-  staffInviteExpiryDays: 30
 
 async:
   workerCount: 40
@@ -100,7 +96,11 @@ cron:
   # IANA fallback zone for schedule validation and users with no stored zone.
   defaultZone: "Asia/Kolkata"
   # Per-job switches, keyed by job name. Feature modules add theirs here.
-  jobs: {}
+  jobs:
+    # Nightly re-evaluation of any warehouse whose projection lags the
+    # current rulesVersion (D-040 safety net). Off until needed.
+    attributes_recompute_safety_net:
+      enabled: false
 
 # WarehouseHub feature tunables. Each feature module adds its own sub-block
 # (attributes, catalog, search, aisearch, enquiries, analytics) as it lands.
@@ -109,3 +109,9 @@ warehousehub:
   # TODO(D-005): set once the domain/branding is decided.
   publicBaseURL: ""
   adminBaseURL: ""
+  attributes:
+    # Other instances pick up a tree/industry write within this many seconds
+    # (the instance serving the write reloads immediately).
+    cacheRefreshSeconds: 60
+    # Warehouses per attributes.recompute_batch message.
+    recomputeBatchSize: 200

@@ -60,7 +60,7 @@ func serveDeletion(handler http.HandlerFunc, r *http.Request) *httptest.Response
 
 func TestDeleteUser_InvalidBody(t *testing.T) {
 	deleteNeverCalled(t)
-	caller := callerUser(models.RoleKeySuperuser)
+	caller := callerUser(models.RoleSuperuser)
 
 	for _, userID := range []string{"", "not-a-hex-id"} {
 		rec := serveDeletion(HandleAdminDeleteUser, deserReq(caller, adminDeleteUserRequest{UserID: userID}))
@@ -76,7 +76,7 @@ func TestDeleteUser_UnknownTarget(t *testing.T) {
 		return false, nil, nil
 	})
 
-	rec := serveDeletion(HandleAdminDeleteUser, deserReq(callerUser(models.RoleKeySuperuser),
+	rec := serveDeletion(HandleAdminDeleteUser, deserReq(callerUser(models.RoleSuperuser),
 		adminDeleteUserRequest{UserID: primitive.NewObjectID().Hex()}))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
@@ -85,7 +85,7 @@ func TestDeleteUser_UnknownTarget(t *testing.T) {
 
 func TestDeleteUser_SelfDeletionRefused(t *testing.T) {
 	deleteNeverCalled(t)
-	caller := callerUser(models.RoleKeySuperuser)
+	caller := callerUser(models.RoleSuperuser)
 	withFindUserIncludingDeactivatedSeam(t, func(ctx context.Context, id string) (bool, *models.User, error) {
 		return true, caller, nil // target IS the caller
 	})
@@ -98,12 +98,12 @@ func TestDeleteUser_SelfDeletionRefused(t *testing.T) {
 
 func TestDeleteUser_SuperuserTargetRefused(t *testing.T) {
 	deleteNeverCalled(t)
-	target := &models.User{ID: primitive.NewObjectID(), Email: "root@x.com", Role: models.RoleKeySuperuser}
+	target := &models.User{ID: primitive.NewObjectID(), Email: "root@x.com", Role: models.RoleSuperuser}
 	withFindUserIncludingDeactivatedSeam(t, func(ctx context.Context, id string) (bool, *models.User, error) {
 		return true, target, nil
 	})
 
-	rec := serveDeletion(HandleAdminDeleteUser, deserReq(callerUser(models.RoleKeySuperuser),
+	rec := serveDeletion(HandleAdminDeleteUser, deserReq(callerUser(models.RoleSuperuser),
 		adminDeleteUserRequest{UserID: target.ID.Hex()}))
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("status = %d, want 403 (superuser undeletable)", rec.Code)
@@ -114,7 +114,7 @@ func TestDeleteUser_SuperuserTargetRefused(t *testing.T) {
 // so the admin can re-run the deletion to completion.
 func TestDeleteUser_TombstonedTargetStillResolvable(t *testing.T) {
 	deactivatedAt := time.Now()
-	target := &models.User{ID: primitive.NewObjectID(), Email: "gone@x.com", Role: models.RoleKeyUser, DeactivatedAt: &deactivatedAt}
+	target := &models.User{ID: primitive.NewObjectID(), Email: "gone@x.com", Role: models.RoleUser, DeactivatedAt: &deactivatedAt}
 	withFindUserIncludingDeactivatedSeam(t, func(ctx context.Context, id string) (bool, *models.User, error) {
 		return true, target, nil
 	})
@@ -128,7 +128,7 @@ func TestDeleteUser_TombstonedTargetStillResolvable(t *testing.T) {
 		return &accountService.DeletionReport{UserScrubbed: true}, nil
 	})
 
-	rec := serveDeletion(HandleAdminDeleteUser, deserReq(callerUser(models.RoleKeySuperuser),
+	rec := serveDeletion(HandleAdminDeleteUser, deserReq(callerUser(models.RoleSuperuser),
 		adminDeleteUserRequest{UserID: target.ID.Hex()}))
 	if rec.Code != http.StatusOK || !called {
 		t.Errorf("status = %d (called=%v), want 200 with service called", rec.Code, called)
@@ -136,7 +136,7 @@ func TestDeleteUser_TombstonedTargetStillResolvable(t *testing.T) {
 }
 
 func TestDeleteUser_ServiceErrorIs500(t *testing.T) {
-	target := &models.User{ID: primitive.NewObjectID(), Role: models.RoleKeyUser}
+	target := &models.User{ID: primitive.NewObjectID(), Role: models.RoleUser}
 	withFindUserIncludingDeactivatedSeam(t, func(ctx context.Context, id string) (bool, *models.User, error) {
 		return true, target, nil
 	})
@@ -144,7 +144,7 @@ func TestDeleteUser_ServiceErrorIs500(t *testing.T) {
 		return nil, errors.New("clerk down")
 	})
 
-	rec := serveDeletion(HandleAdminDeleteUser, deserReq(callerUser(models.RoleKeySuperuser),
+	rec := serveDeletion(HandleAdminDeleteUser, deserReq(callerUser(models.RoleSuperuser),
 		adminDeleteUserRequest{UserID: target.ID.Hex()}))
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", rec.Code)

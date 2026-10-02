@@ -1,11 +1,9 @@
 package providers
 
 import (
-	"context"
 	"os"
 	"time"
 
-	"github.com/atharva-ng/crunch/internal/authz"
 	"github.com/atharva-ng/crunch/internal/config"
 	"github.com/atharva-ng/crunch/internal/cron"
 	"github.com/atharva-ng/crunch/internal/modules"
@@ -22,12 +20,10 @@ import (
 	accountsvc "github.com/atharva-ng/crunch/internal/services/accountService/service"
 	accountstore "github.com/atharva-ng/crunch/internal/services/accountService/store"
 	asynchandler "github.com/atharva-ng/crunch/internal/services/asyncHandler"
-	"github.com/atharva-ng/crunch/internal/services/staffinvites"
 	usersvc "github.com/atharva-ng/crunch/internal/services/userservice/service"
 	userstore "github.com/atharva-ng/crunch/internal/services/userservice/store"
 	"github.com/atharva-ng/crunch/internal/tokentracker"
 	"github.com/atharva-ng/crunch/internal/util/log"
-	"github.com/atharva-ng/crunch/internal/warehousehub/changelog"
 )
 
 // InjectDefaultProviders wires the infrastructure providers: S3, the token
@@ -129,26 +125,12 @@ func buildImageGenerator(appCtx *config.AppContext) interfaces.ImageGenerator {
 func InjectDefaultServices(appCtx *config.AppContext, mods []modules.Module) error {
 	appCtx.InternalServices.UserService = usersvc.NewService(userstore.NewStore())
 
-	// Role catalog cache (RBAC). Boot-loads all role docs (hard-fail on DB
-	// error, empty catalog tolerated + logged — the binary deploys before the
-	// seed run); the refresh ticker starts in main once the shutdown context
-	// exists. Backs the admin authorization gate.
-	rolesCache, err := authz.NewRolesCache(context.Background())
-	if err != nil {
-		return err
-	}
-	appCtx.RolesCache = rolesCache
-	log.Info("Injected roles cache")
-
 	appCtx.InternalServices.ClerkAccounts = clerkaccounts.GetProvider()
 	appCtx.InternalServices.AccountService = accountsvc.NewService(
 		accountstore.NewStore(),
 		appCtx.InternalServices.ClerkAccounts,
 		modules.DataCleaners(mods),
 	)
-
-	inviteExpiry := time.Duration(appCtx.Config.Values.Admin.StaffInviteExpiryDays) * 24 * time.Hour
-	appCtx.InternalServices.StaffInvites = staffinvites.New(changelog.New(), inviteExpiry)
 
 	return nil
 }

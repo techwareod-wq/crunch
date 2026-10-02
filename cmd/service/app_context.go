@@ -32,16 +32,17 @@ func ProvideAppContext(appCtx *config.AppContext, mods []modules.Module) error {
 	}
 	for _, ensure := range []func(context.Context) error{
 		models.EnsureUserIndexes,
-		models.EnsureRoleIndexes,
 		models.EnsureAdminActionIndexes,
 		models.EnsureCronClaimIndexes,
 		models.EnsureCronRunIndexes,
 		models.EnsureChangeLogIndexes,
-		models.EnsureStaffInviteIndexes,
 	} {
 		if err := ensure(context.Background()); err != nil {
 			return err
 		}
+	}
+	if err := modules.EnsureIndexes(context.Background(), mods); err != nil {
+		return err
 	}
 	log.Info("MongoDB connected")
 

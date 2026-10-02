@@ -8,187 +8,52 @@ import (
 	"github.com/atharva-ng/crunch/internal/middleware"
 )
 
-// Handle registers the /v1/admin/* routes. Every route chains
-// WithAdminAuthorization inside WithJWTAuthentication (last chained runs first,
-// so JWT populates the user before the permission check). Admin-triggered work
-// shares the global tokentracker LLM budget because the same services and
-// queues are reused.
+// Handle registers the platform /v1/admin/* routes (feature modules register
+// their own). Every route chains WithAdminAuthorization inside
+// WithJWTAuthentication (last chained runs first, so JWT populates the user
+// before the permission check) and is tagged with what it needs on top of
+// panel access (internal/authz):
 //
-// Every route is tagged with its domain permission (RBAC plan §3/§5) — the
-// baseline admin.access is always required, plus each tagged permission. This
-// is what makes future custom (e.g. support-tier) roles enforceable. Only
-// whoami is argless (baseline only). Shared multi-verb
-// paths (roles) are tagged with the READ permission and re-check the
-// WRITE permission in-handler (the registry is path-only).
+//   - whoami: any admin
+//   - audit trail + change log: approver
+//   - users, access, deletion, cron: superuser
 //
-// Mirrors keep the same /delete, /edit suffix workarounds as the user routes —
-// the registry is path-only, so verbs can't share a path.
+// The registry is path-only, so verbs can't share a path (hence /delete-style
+// suffixes).
 func Handle(appCtx *config.AppContext) {
-	// --- console (acting-admin identity + persisted audit trail) ---
+	route := func(path string, h http.HandlerFunc, method string, body func(http.Handler) http.Handler, required ...authz.Permission) {
+		p := middleware.Handle(path, h).
+			WithAdminAuthorization(required...).
+			WithJWTAuthentication()
+		if body != nil {
+			p = p.With(body)
+		}
+		p.WithMethods(method).
+			With(appCtx.Middleware()).
+			AllowCORS().
+			WithLogEnabled()
+	}
 
-	middleware.Handle("/v1/admin/whoami", http.HandlerFunc(HandleAdminWhoami)).
-		WithAdminAuthorization().
-		WithJWTAuthentication().
-		WithMethods("GET").
-		With(appCtx.Middleware()).
-		AllowCORS().
-		WithLogEnabled()
-
-	middleware.Handle("/v1/admin/audit", http.HandlerFunc(HandleAdminListAuditActions)).
-		WithAdminAuthorization(authz.PermAuditRead).
-		WithJWTAuthentication().
-		WithMethods("GET").
-		With(appCtx.Middleware()).
-		AllowCORS().
-		WithLogEnabled()
+	// --- console ---
+	route("/v1/admin/whoami", HandleAdminWhoami, http.MethodGet, nil)
+	route("/v1/admin/audit", HandleAdminListAuditActions, http.MethodGet, nil, authz.PermApprover)
 
 	// --- WarehouseHub change log (D-014): full before/after docs ---
+	route("/v1/admin/changes", HandleAdminListChanges, http.MethodGet, nil, authz.PermApprover)
+	route("/v1/admin/changes/detail", HandleAdminChangeDetail, http.MethodGet, nil, authz.PermApprover)
 
-	middleware.Handle("/v1/admin/changes", http.HandlerFunc(HandleAdminListChanges)).
-		WithAdminAuthorization(authz.PermAuditRead).
-		WithJWTAuthentication().
-		WithMethods("GET").
-		With(appCtx.Middleware()).
-		AllowCORS().
-		WithLogEnabled()
-
-	middleware.Handle("/v1/admin/changes/detail", http.HandlerFunc(HandleAdminChangeDetail)).
-		WithAdminAuthorization(authz.PermAuditRead).
-		WithJWTAuthentication().
-		WithMethods("GET").
-		With(appCtx.Middleware()).
-		AllowCORS().
-		WithLogEnabled()
-
-	// --- roles & permissions (RBAC) ---
-	// GET lists (roles.read); POST upserts (roles.write, re-checked in-handler
-	// since the path-only registry can't gate GET and POST differently).
-
-	middleware.Handle("/v1/admin/roles", http.HandlerFunc(HandleAdminRoles)).
-		WithAdminAuthorization(authz.PermRolesRead).
-		WithJWTAuthentication().
-		WithMethods("GET", "POST").
-		With(appCtx.Middleware()).
-		AllowCORS().
-		WithLogEnabled()
-
-	middleware.Handle("/v1/admin/roles/delete", http.HandlerFunc(HandleAdminDeleteRole)).
-		WithAdminAuthorization(authz.PermRolesWrite).
-		WithJWTAuthentication().
-		With(middleware.DeserializeJson[adminDeleteRoleRequest]()).
-		WithMethods("POST").
-		With(appCtx.Middleware()).
-		AllowCORS().
-		WithLogEnabled()
-
-	// Catalog seed — the API twin of `rolesmigrate -seed-roles` (dry-run
-	// default).
-	middleware.Handle("/v1/admin/roles/seed", http.HandlerFunc(HandleAdminSeedRoles)).
-		WithAdminAuthorization(authz.PermRolesWrite).
-		WithJWTAuthentication().
-		With(middleware.DeserializeJsonOptional[adminSeedRolesRequest]()).
-		WithMethods("POST").
-		With(appCtx.Middleware()).
-		AllowCORS().
-		WithLogEnabled()
-
-	// --- staff invites (D-011): superuser only ---
-
-	middleware.Handle("/v1/admin/staff/invite", http.HandlerFunc(HandleAdminStaffInvite)).
-		WithAdminAuthorization(authz.PermStaffInvite).
-		WithJWTAuthentication().
-		With(middleware.DeserializeJson[adminStaffInviteRequest]()).
-		WithMethods("POST").
-		With(appCtx.Middleware()).
-		AllowCORS().
-		WithLogEnabled()
-
-	middleware.Handle("/v1/admin/staff/invites", http.HandlerFunc(HandleAdminListStaffInvites)).
-		WithAdminAuthorization(authz.PermStaffInvite).
-		WithJWTAuthentication().
-		WithMethods("GET").
-		With(appCtx.Middleware()).
-		AllowCORS().
-		WithLogEnabled()
-
-	middleware.Handle("/v1/admin/staff/invites/revoke", http.HandlerFunc(HandleAdminRevokeStaffInvite)).
-		WithAdminAuthorization(authz.PermStaffInvite).
-		WithJWTAuthentication().
-		With(middleware.DeserializeJson[adminRevokeStaffInviteRequest]()).
-		WithMethods("POST").
-		With(appCtx.Middleware()).
-		AllowCORS().
-		WithLogEnabled()
-
-	// --- users (dashboard entry points + profile + role/grants management) ---
-
-	middleware.Handle("/v1/admin/users", http.HandlerFunc(HandleAdminListUsers)).
-		WithAdminAuthorization(authz.PermUsersRead).
-		WithJWTAuthentication().
-		WithMethods("GET").
-		With(appCtx.Middleware()).
-		AllowCORS().
-		WithLogEnabled()
-
-	middleware.Handle("/v1/admin/users/lookup", http.HandlerFunc(HandleAdminLookupUser)).
-		WithAdminAuthorization(authz.PermUsersRead).
-		WithJWTAuthentication().
-		WithMethods("GET").
-		With(appCtx.Middleware()).
-		AllowCORS().
-		WithLogEnabled()
-
-	middleware.Handle("/v1/admin/users/profile", http.HandlerFunc(HandleAdminGetProfile)).
-		WithAdminAuthorization(authz.PermUsersRead).
-		WithJWTAuthentication().
-		WithMethods("GET").
-		With(appCtx.Middleware()).
-		AllowCORS().
-		WithLogEnabled()
-
-	middleware.Handle("/v1/admin/users/role", http.HandlerFunc(HandleAdminSetUserRole)).
-		WithAdminAuthorization(authz.PermRolesWrite).
-		WithJWTAuthentication().
-		With(middleware.DeserializeJson[adminSetUserRoleRequest]()).
-		WithMethods("POST").
-		With(appCtx.Middleware()).
-		AllowCORS().
-		WithLogEnabled()
-
-	middleware.Handle("/v1/admin/users/grants", http.HandlerFunc(HandleAdminSetUserGrants)).
-		WithAdminAuthorization(authz.PermRolesWrite).
-		WithJWTAuthentication().
-		With(middleware.DeserializeJson[adminSetUserGrantsRequest]()).
-		WithMethods("POST").
-		With(appCtx.Middleware()).
-		AllowCORS().
-		WithLogEnabled()
-
-	middleware.Handle("/v1/admin/users/delete", http.HandlerFunc(HandleAdminDeleteUser)).
-		WithAdminAuthorization(authz.PermUsersDelete).
-		WithJWTAuthentication().
-		With(middleware.DeserializeJson[adminDeleteUserRequest]()).
-		WithMethods("POST").
-		With(appCtx.Middleware()).
-		AllowCORS().
-		WithLogEnabled()
+	// --- users + access (staff onboarding: they sign in, a superuser sets
+	// their access) ---
+	route("/v1/admin/users", HandleAdminListUsers, http.MethodGet, nil, authz.PermSuperuser)
+	route("/v1/admin/users/lookup", HandleAdminLookupUser, http.MethodGet, nil, authz.PermSuperuser)
+	route("/v1/admin/users/profile", HandleAdminGetProfile, http.MethodGet, nil, authz.PermSuperuser)
+	route("/v1/admin/users/access", HandleAdminSetUserAccess, http.MethodPost,
+		middleware.DeserializeJson[adminSetUserAccessRequest](), authz.PermSuperuser)
+	route("/v1/admin/users/delete", HandleAdminDeleteUser, http.MethodPost,
+		middleware.DeserializeJson[adminDeleteUserRequest](), authz.PermSuperuser)
 
 	// --- cron (force-run + job listing) ---
-
-	middleware.Handle("/v1/admin/cron/run", http.HandlerFunc(HandleAdminCronRun)).
-		WithAdminAuthorization(authz.PermCronManage).
-		WithJWTAuthentication().
-		With(middleware.DeserializeJson[adminCronRunRequest]()).
-		WithMethods("POST").
-		With(appCtx.Middleware()).
-		AllowCORS().
-		WithLogEnabled()
-
-	middleware.Handle("/v1/admin/cron/jobs", http.HandlerFunc(HandleAdminCronJobs)).
-		WithAdminAuthorization(authz.PermCronManage).
-		WithJWTAuthentication().
-		WithMethods("GET").
-		With(appCtx.Middleware()).
-		AllowCORS().
-		WithLogEnabled()
+	route("/v1/admin/cron/run", HandleAdminCronRun, http.MethodPost,
+		middleware.DeserializeJson[adminCronRunRequest](), authz.PermSuperuser)
+	route("/v1/admin/cron/jobs", HandleAdminCronJobs, http.MethodGet, nil, authz.PermSuperuser)
 }

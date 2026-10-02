@@ -36,11 +36,11 @@ The WarehouseHub feature modules live in `internal/modules/{attributes,catalog,s
 ## Run locally
 
 1. Put real values in `.env`. It starts with **dummy values only** and is gitignored; see `.env.example` for what each value does.
-2. Seed the roles and your first superuser (sign in once through Clerk first, so your user exists):
+2. Make yourself superuser (sign in once through Clerk first, so your user exists):
    ```
-   go run ./cmd/rolesmigrate -seed-roles
-   go run ./cmd/rolesmigrate -seed-admins -emails you@example.com
+   go run ./cmd/superuser -emails you@example.com -apply
    ```
+   Other staff: they sign in, then you set their access (admin + editor/approver) from the admin panel.
 3. Start the service with `go run ./cmd/service`.
 4. Check it:
    - `curl localhost:3090/health`

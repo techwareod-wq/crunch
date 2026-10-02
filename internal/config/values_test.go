@@ -112,10 +112,6 @@ func TestValues_GoldenDefaults(t *testing.T) {
 			if got := v.APIs.HTTPClient.TimeoutSeconds; got != 60 {
 				t.Errorf("APIs.HTTPClient.TimeoutSeconds = %d, want 60", got)
 			}
-			// Roles cache refresh interval.
-			if got := v.Admin.CacheRefreshSeconds; got != 60 {
-				t.Errorf("Admin.CacheRefreshSeconds = %d, want 60", got)
-			}
 			// Gated-SQS backpressure pause.
 			if got := v.SQS.GatedPauseSeconds; got != 5 {
 				t.Errorf("SQS.GatedPauseSeconds = %d, want 5", got)

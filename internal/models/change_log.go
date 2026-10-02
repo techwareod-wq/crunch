@@ -13,7 +13,7 @@ import (
 
 // ChangeLogEntry is one row of the WarehouseHub change log (D-014): the full
 // document before and after every change to a listing, revision, rent, media,
-// attribute definition, industry, enquiry or staff invite. Kept forever.
+// attribute definition, industry or enquiry. Kept forever.
 // Distinct from adminActions (the request-level security trail, which stores
 // only a payload hash).
 type ChangeLogEntry struct {

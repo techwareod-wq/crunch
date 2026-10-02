@@ -17,11 +17,14 @@ import (
 // providers are injected, so they must read appCtx lazily. Cross-module
 // dependencies (domain interfaces) are wired here too.
 func enabledModules(appCtx *config.AppContext) []modules.Module {
+	// attrs.Rules() is the domain.Rules snapshot the catalog (03) and search
+	// (04) evaluate with; hand it to them as they land.
+	attrs := attributes.New(appCtx)
 	return []modules.Module{
 		mail.New(appCtx), // platform: mail.send job (D-103)
 
 		// WarehouseHub (D-004): one module per service.
-		attributes.New(appCtx),
+		attrs,
 		catalog.New(appCtx),
 		search.New(appCtx),
 		aisearch.New(appCtx),

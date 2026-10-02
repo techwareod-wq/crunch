@@ -17,17 +17,6 @@ import (
 
 const bearerPrefixLen = 7 // length of "Bearer "
 
-// userCreatedHook runs after JWT auto-create inserts a new user (staff invite
-// role apply, D-011). Set once at boot; nil = no-op. It must not fail auth:
-// errors are the hook's to log.
-var userCreatedHook func(ctx context.Context, u *models.User)
-
-// SetUserCreatedHook installs the post-auto-create hook. Call at boot, before
-// serving.
-func SetUserCreatedHook(fn func(ctx context.Context, u *models.User)) {
-	userCreatedHook = fn
-}
-
 func (p pattern) WithJWTAuthentication() pattern {
 	decorate := authenticateWithClerk()
 	ro := routes[string(p)]
@@ -108,7 +97,7 @@ func resolveUserByClerkID(ctx context.Context, clerkID string) (*models.User, er
 	// First-time user — create a minimal record. The webhook will fill in details.
 	newUser := &models.User{
 		ClerkID: clerkID,
-		Role:    models.RoleKeyUser,
+		Role:    models.RoleUser,
 	}
 
 	clerkUsr, err := clerkuser.Get(ctx, clerkID)
@@ -161,9 +150,6 @@ func resolveUserByClerkID(ctx context.Context, clerkID string) (*models.User, er
 		return existing, nil
 	}
 
-	if userCreatedHook != nil {
-		userCreatedHook(ctx, newUser)
-	}
 	return newUser, nil
 }
 

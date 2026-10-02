@@ -4,12 +4,10 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/atharva-ng/crunch/internal/authz"
 	"github.com/atharva-ng/crunch/internal/providers/interfaces"
 	"github.com/atharva-ng/crunch/internal/tokentracker"
 
 	"github.com/atharva-ng/crunch/internal/services/accountService"
-	"github.com/atharva-ng/crunch/internal/services/staffinvites"
 	"github.com/atharva-ng/crunch/internal/services/userservice"
 )
 
@@ -61,11 +59,8 @@ type InternalServices struct {
 	// Mailer sends transactional email; Enabled() is false with no SMTP_HOST.
 	Mailer     interfaces.Mailer
 	Dispatcher interfaces.Dispatcher
-	// ClerkAccounts is the outbound Clerk Backend API (deletes, invitations).
+	// ClerkAccounts is the outbound Clerk Backend API (account deletes).
 	ClerkAccounts interfaces.ClerkAccounts
-	// StaffInvites applies a pending staff invite's role on first sign-in
-	// (D-011).
-	StaffInvites *staffinvites.Service
 }
 
 type AppContext struct {
@@ -77,7 +72,6 @@ type AppContext struct {
 	SecondaryQueueProvider interfaces.Queue
 	IdempotencyStore       interfaces.IdempotencyStore
 	TokenTracker           *tokentracker.Tracker
-	RolesCache             *authz.RolesCache
 	InternalServices       InternalServices
 }
 

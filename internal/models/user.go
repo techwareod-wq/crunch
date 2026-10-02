@@ -12,8 +12,6 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-const defaultUserRole = "user"
-
 // EnsureUserIndexes creates a unique index on clerk_id. Two concurrent paths
 // (JWT stub creation and the Clerk webhook) can both pass a find-then-create
 // check for the same clerk_id — the unique index makes the loser get a dup-key
@@ -36,18 +34,12 @@ type User struct {
 	ClerkID string             `bson:"clerk_id"                    json:"clerk_id"`
 	Email   string             `bson:"email"                       json:"email"`
 	Name    string             `bson:"name"                        json:"name"`
-	// Role is the authoritative privilege axis (RBAC plan): it references a
-	// Role.Key in the roles catalog. Defaults to "user" (no admin access).
+	// Role is user, admin or superuser (see internal/authz).
 	Role string `bson:"role" json:"role"`
-	// ExtraGrants / ExtraRevokes are the per-user half of the hybrid RBAC model:
-	// permission keys added to / removed from the role's set, honoring per-entry
-	// expiry. They use the OverrideEntry shape (key/expires_at/by/at). Superuser-tier keys and admin.access are rejected
-	// in grants at the API layer (authz containment guard), so a grant can never
-	// escalate someone into staff or superuser powers.
-	ExtraGrants  []OverrideEntry `bson:"extra_grants,omitempty"  json:"-"`
-	ExtraRevokes []OverrideEntry `bson:"extra_revokes,omitempty" json:"-"`
-	// RoleUpdatedAt is the optimistic-concurrency token for role assignment AND
-	// grants edits (both write surfaces compare-and-set on it — RBAC plan §6).
+	// Permissions are an admin's assignable permissions: "editor" and/or
+	// "approver". Ignored for any other role.
+	Permissions []string `bson:"permissions,omitempty" json:"permissions,omitempty"`
+	// RoleUpdatedAt is the optimistic-concurrency token for access edits.
 	RoleUpdatedAt *time.Time `bson:"role_updated_at,omitempty" json:"role_updated_at,omitempty"`
 	CreatedAt     time.Time  `bson:"created_at"                  json:"created_at"`
 	UpdatedAt     time.Time  `bson:"updated_at"                  json:"updated_at"`
@@ -64,13 +56,6 @@ type User struct {
 	PhoneE164        string     `bson:"phone_e164,omitempty"         json:"phoneE164,omitempty"`
 	Company          string     `bson:"company,omitempty"            json:"company,omitempty"`
 	ProfileUpdatedAt *time.Time `bson:"profile_updated_at,omitempty" json:"profileUpdatedAt,omitempty"`
-}
-
-type OverrideEntry struct {
-	Key       string     `bson:"key"`
-	ExpiresAt *time.Time `bson:"expires_at,omitempty"` // nil = no expiry
-	By        string     `bson:"by"`                   // admin email (audit)
-	At        time.Time  `bson:"at"`
 }
 
 // activeFilter merges the always-on "not deactivated" predicate into a query.
@@ -200,7 +185,7 @@ func CreateUser(ctx context.Context, user *User) error {
 	user.CreatedAt = now
 	user.UpdatedAt = now
 	if user.Role == "" {
-		user.Role = defaultUserRole
+		user.Role = RoleUser
 	}
 
 	id, err := InsertOne(ctx, usersCollection, user)
@@ -231,71 +216,39 @@ func UpdateUserByClerkID(ctx context.Context, clerkID string, update bson.M) err
 	return UpdateOne(ctx, usersCollection, activeFilter(bson.M{"clerk_id": clerkID}), bson.M{"$set": update})
 }
 
-// setUserRoleAxis is the shared compare-and-set write behind SetUserRole and
-// SetUserGrants: both surfaces guard on role_updated_at so a concurrent role
-// change and a concurrent grants edit can't silently clobber each other (RBAC
-// plan §6). set/unset are the field mutations; role_updated_at + updated_at are
-// always stamped. Distinguishes a stale precondition (ErrRoleConflictOnUser)
-// from a missing user, mirroring the other CAS writes.
-func setUserRoleAxis(ctx context.Context, userID primitive.ObjectID, set bson.M, unset bson.M, expected *time.Time) error {
-	filter := bson.M{fieldID: userID}
+// SetUserAccess sets role + permissions with optimistic concurrency on
+// role_updated_at (expected nil matches a user never edited). The rules on
+// who may set what are the caller's (admin controller); this trusts its input.
+// A stale token is ErrRoleConflictOnUser.
+func SetUserAccess(ctx context.Context, userID primitive.ObjectID, role string, permissions []string, expected *time.Time) error {
+	filter := activeFilter(bson.M{fieldID: userID})
 	if expected != nil {
 		filter["role_updated_at"] = expected.UTC()
 	} else {
 		filter["role_updated_at"] = nil // matches absent or null
 	}
-
 	now := time.Now().UTC()
-	set["role_updated_at"] = now
-	set[fieldUpdatedAt] = now
-	update := bson.M{"$set": set}
-	if len(unset) > 0 {
-		update["$unset"] = unset
+	update := bson.M{"$set": bson.M{"role": role, "role_updated_at": now, fieldUpdatedAt: now}}
+	if len(permissions) > 0 {
+		update["$set"].(bson.M)["permissions"] = permissions
+	} else {
+		update["$unset"] = bson.M{"permissions": ""}
 	}
-
 	res, err := Collection(usersCollection).UpdateOne(ctx, filter, update)
 	if err != nil {
 		return err
 	}
 	if res.MatchedCount == 0 {
-		var u User
-		found, ferr := FindOne(ctx, usersCollection, bson.M{fieldID: userID}, &u)
+		found, _, ferr := FindUserByIDIncludingDeactivated(ctx, userID.Hex())
 		if ferr != nil {
 			return ferr
 		}
 		if !found {
-			return fmt.Errorf("set user role: user %s not found", userID.Hex())
+			return fmt.Errorf("set user access: user %s not found", userID.Hex())
 		}
 		return ErrRoleConflictOnUser
 	}
 	return nil
-}
-
-// SetUserRole assigns a role key with optimistic concurrency on
-// role_updated_at. Privilege-escalation guards (rank ceiling, grant-only-what-
-// you-hold, last-superuser) are enforced by the caller (authz + handler); this
-// helper trusts its input.
-func SetUserRole(ctx context.Context, userID primitive.ObjectID, role string, expected *time.Time) error {
-	return setUserRoleAxis(ctx, userID, bson.M{"role": role}, nil, expected)
-}
-
-// SetUserGrants replaces the extra_grants / extra_revokes sets with optimistic
-// concurrency on role_updated_at. Key validity (known, non-superuser-tier,
-// admin.access forbidden in grants) is enforced at the controller layer.
-func SetUserGrants(ctx context.Context, userID primitive.ObjectID, grants, revokes []OverrideEntry, expected *time.Time) error {
-	set := bson.M{}
-	unset := bson.M{}
-	if len(grants) > 0 {
-		set["extra_grants"] = grants
-	} else {
-		unset["extra_grants"] = ""
-	}
-	if len(revokes) > 0 {
-		set["extra_revokes"] = revokes
-	} else {
-		unset["extra_revokes"] = ""
-	}
-	return setUserRoleAxis(ctx, userID, set, unset, expected)
 }
 
 // DeactivateUserByClerkID stamps deactivated_at on the user without removing the

@@ -9,9 +9,8 @@ import (
 	"github.com/atharva-ng/crunch/internal/middleware"
 )
 
-// cronScheduler is set once in main after BuildCronScheduler (the
-// SetRolesCache precedent: the admin package can't ride on
-// AppContext without a config→cron import cycle).
+// cronScheduler is set once in main after BuildCronScheduler (the admin
+// package can't ride on AppContext without a config→cron import cycle).
 var cronScheduler *cron.Scheduler
 
 // SetCronScheduler wires the scheduler for the run-now endpoint.

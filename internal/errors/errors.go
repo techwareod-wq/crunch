@@ -65,50 +65,21 @@ var (
 	ErrMethodNotAllowed = newError(http.StatusMethodNotAllowed, "method not allowed")
 )
 
-// Roles / RBAC admin surface
+// Admin access management
 var (
-	// ErrUnknownPermissionKey rejects role/grant writes containing keys not in
-	// the authz permission constants — a typo'd grant that silently no-ops
-	// would leave staff without access they believe they have.
-	ErrUnknownPermissionKey = newError(http.StatusBadRequest, "unknown permission key")
-	// ErrInvalidRoleDoc rejects role catalog writes that fail structural
-	// validation (empty key, invalid permission entry).
-	ErrInvalidRoleDoc = newError(http.StatusBadRequest, "invalid role document")
-	// ErrRoleNotFound: the assignment/delete target names a role key that does
-	// not exist in the catalog.
-	ErrRoleNotFound = newError(http.StatusNotFound, "role not found")
-	// ErrRolesConflict (409): a role/grants/catalog write's optimistic-
-	// concurrency precondition (updated_at / role_updated_at) didn't match —
-	// another admin changed it since it was read.
-	ErrRolesConflict = newError(http.StatusConflict, "role changed since last read — refetch and retry")
-	// ErrRoleEscalation (403) covers every privilege-escalation guard: assigning
-	// a role at/above your own rank, granting a permission you don't hold, or
-	// placing a superuser-tier / admin.access key where it isn't allowed. A plain
-	// 403 — the caller reached the panel but overreached this specific action.
-	ErrRoleEscalation = newError(http.StatusForbidden, "insufficient privilege for this role change")
-	// ErrImmutableRole (403): editing the rank/permissions of an immutable
-	// system role (user/superuser), or deleting any system role.
-	ErrImmutableRole = newError(http.StatusForbidden, "this role is protected and cannot be modified")
-	// ErrRoleInUse (409): a role delete was refused because active users still
-	// hold it.
-	ErrRoleInUse = newError(http.StatusConflict, "role is still assigned to one or more users")
-	// ErrLastSuperuser (409): a change would drop the count of active superusers
-	// to zero — the recovery-holder lockout guard. Recover via rolesmigrate.
-	ErrLastSuperuser = newError(http.StatusConflict, "cannot remove the last superuser")
+	// ErrInvalidAccess: role must be user or admin; permissions any of
+	// editor/approver, and none for role user.
+	ErrInvalidAccess = &Error{Code: http.StatusBadRequest, Message: "role must be user or admin; permissions any of editor, approver (none for user)", ErrCode: "invalid_access"}
+	// ErrAccessConflict (409): the target's access changed since it was read.
+	ErrAccessConflict = &Error{Code: http.StatusConflict, Message: "access changed since last read — refetch and retry", ErrCode: "access_conflict"}
+	// ErrSuperuserImmutable (403): superuser accounts are managed only by
+	// cmd/superuser, never through the API.
+	ErrSuperuserImmutable = newError(http.StatusForbidden, "superuser accounts can't be changed from the panel")
 	// ErrSelfDeletion (409): an admin tried to delete their own account through
 	// the admin surface.
 	ErrSelfDeletion = newError(http.StatusConflict, "cannot delete your own account")
-	// ErrSuperuserUndeletable (403): superuser accounts cannot be deleted —
-	// demote the role first, where the last-superuser guard already applies.
-	ErrSuperuserUndeletable = newError(http.StatusForbidden, "superusers cannot be deleted — demote the role first")
-
-	// Staff invites (D-011).
-	ErrInvalidInvite    = newError(http.StatusBadRequest, "invite needs a valid email and role editor or approver")
-	ErrInvitePending    = newError(http.StatusConflict, "a pending invite already exists for this email")
-	ErrStaffUserExists  = newError(http.StatusConflict, "this email already has an account — set its role from the users page")
-	ErrInviteNotPending = newError(http.StatusConflict, "invite is no longer pending")
-	// ErrUpstreamUnavailable (502): a third-party API call (e.g. Clerk) failed.
-	ErrUpstreamUnavailable = newError(http.StatusBadGateway, "upstream service failed — try again")
+	// ErrSuperuserUndeletable (403): superuser accounts cannot be deleted.
+	ErrSuperuserUndeletable = newError(http.StatusForbidden, "superusers cannot be deleted")
 )
 
 // 500 Internal Server Error
@@ -120,6 +91,8 @@ var (
 	ErrAdminCheckFailed      = newError(http.StatusInternalServerError, "failed to verify admin request")
 	ErrLLMServiceUnavailable = newError(http.StatusInternalServerError, "LLM service not available")
 	ErrLLMProcessingFailed   = newError(http.StatusInternalServerError, "failed to process LLM response")
+	// ErrInternal is the generic 500 for an unexpected server-side failure.
+	ErrInternal = newError(http.StatusInternalServerError, "internal error")
 	// ErrDispatchFailed covers a failure to enqueue async work.
 	ErrDispatchFailed = newError(http.StatusInternalServerError, "failed to dispatch job")
 )

@@ -63,9 +63,8 @@ type adminDeleteUserRequest struct {
 // HandleAdminDeleteUser destroys the target's account: every registered
 // feature's data (accountService.DataCleaner), the Clerk user, and finally the
 // user doc soft-deleted with PII scrubbed (adminActions survive).
-// Guards: no self-deletion, and no superuser targets — refusing every
-// superuser subsumes the last-superuser count and forces the demote path,
-// where the ErrLastSuperuser guard already lives.
+// Guards: no self-deletion, and no superuser targets (superusers are managed
+// only by cmd/superuser).
 func HandleAdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 	req, ok := r.Context().Value(middleware.DeserializerContextKey).(adminDeleteUserRequest)
 	if !ok {
@@ -84,7 +83,7 @@ func HandleAdminDeleteUser(w http.ResponseWriter, r *http.Request) {
 		middleware.SendJSONError(w, r, apperrors.ErrSelfDeletion)
 		return
 	}
-	if target.Role == models.RoleKeySuperuser {
+	if target.Role == models.RoleSuperuser {
 		middleware.SendJSONError(w, r, apperrors.ErrSuperuserUndeletable)
 		return
 	}

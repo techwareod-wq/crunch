@@ -8,6 +8,9 @@
 package modules
 
 import (
+	"context"
+	"fmt"
+
 	"github.com/atharva-ng/crunch/internal/config"
 	"github.com/atharva-ng/crunch/internal/cron"
 	"github.com/atharva-ng/crunch/internal/pipeline"
@@ -37,6 +40,13 @@ type Module interface {
 	RegisterRoutes(appCtx *config.AppContext)
 	// DataCleaners returns the module's slice of the account-deletion cascade.
 	DataCleaners() []accountService.DataCleaner
+	// EnsureIndexes creates the module's Mongo indexes. Called at boot right
+	// after the DB connects, before providers are injected.
+	EnsureIndexes(ctx context.Context) error
+	// Start boot-loads in-memory state and starts background loops. Called
+	// once in main, after every provider and service is wired and before the
+	// async handlers start; ctx is cancelled on shutdown. An error is fatal.
+	Start(ctx context.Context) error
 }
 
 // Base is a no-op Module to embed, so a module only implements what it uses.
@@ -48,6 +58,8 @@ func (Base) VisibilityOverrides() map[pipeline.ProcessType]int32 { return nil }
 func (Base) CronJobs() []cron.Job                                { return nil }
 func (Base) RegisterRoutes(*config.AppContext)                   {}
 func (Base) DataCleaners() []accountService.DataCleaner          { return nil }
+func (Base) EnsureIndexes(context.Context) error                 { return nil }
+func (Base) Start(context.Context) error                         { return nil }
 
 // BuildRegistry collects every module's async handlers into one registry.
 func BuildRegistry(mods []Module) asynchandler.Registry {
@@ -102,4 +114,24 @@ func RegisterRoutes(appCtx *config.AppContext, mods []Module) {
 	for _, m := range mods {
 		m.RegisterRoutes(appCtx)
 	}
+}
+
+// EnsureIndexes runs every module's index setup, stopping at the first error.
+func EnsureIndexes(ctx context.Context, mods []Module) error {
+	for _, m := range mods {
+		if err := m.EnsureIndexes(ctx); err != nil {
+			return fmt.Errorf("module %s: %w", m.Name(), err)
+		}
+	}
+	return nil
+}
+
+// Start starts every module, stopping at the first error.
+func Start(ctx context.Context, mods []Module) error {
+	for _, m := range mods {
+		if err := m.Start(ctx); err != nil {
+			return fmt.Errorf("module %s: %w", m.Name(), err)
+		}
+	}
+	return nil
 }

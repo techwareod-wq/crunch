@@ -3,7 +3,6 @@ package middleware
 import (
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/atharva-ng/crunch/internal/authz"
 	apperrors "github.com/atharva-ng/crunch/internal/errors"
@@ -11,27 +10,25 @@ import (
 	"github.com/atharva-ng/crunch/internal/util/log"
 )
 
-// WithAdminAuthorization gates the route on the authenticated caller holding
-// the baseline admin.access permission PLUS every `required` route permission,
-// resolved from the DB-backed roles cache. It is variadic so route-specific
-// requirements compose in one place:
+// WithAdminAuthorization gates the route on the authenticated caller having
+// panel access (authz.PermAdmin) PLUS every `required` permission (see
+// internal/authz):
 //
-//	.WithAdminAuthorization(authz.PermContentManage)   // admin.access + content.manage
-//	.WithAdminAuthorization()                          // admin.access only (whoami)
-//	.WithAdminAuthorization(authz.PermRolesWrite)      // superuser-tier route
+//	.WithAdminAuthorization()                    // any admin (whoami, reads)
+//	.WithAdminAuthorization(authz.PermApprover)  // approvers + superusers
+//	.WithAdminAuthorization(authz.PermSuperuser) // superusers only
 //
 // It doubles as the persisted-audit chokepoint (see audit.go): every mutating
 // admin request and every denial is written to adminActions. Coupling audit to
 // this gate means no admin route can be registered without it — opting out of
-// audit would mean opting out of authorization. The audit behavior is UNCHANGED
-// by the permission refactor.
+// audit would mean opting out of authorization.
 //
 // Chaining order matters: middlewares wrap outward, so the LAST chained one
 // runs FIRST. This must be chained BEFORE .WithJWTAuthentication() so that JWT
 // wraps it and has populated UserContextKey by the time it runs:
 //
 //	middleware.Handle(path, handler).
-//	    WithAdminAuthorization(authz.PermUsersRead).  // runs second (inner)
+//	    WithAdminAuthorization(authz.PermEditor).     // runs second (inner)
 //	    WithJWTAuthentication().                       // runs first  (outer)
 //	    ...
 func (p pattern) WithAdminAuthorization(required ...authz.Permission) pattern {
@@ -47,7 +44,7 @@ func (p pattern) WithAdminAuthorization(required ...authz.Permission) pattern {
 		}
 
 		email := strings.ToLower(user.Email)
-		if !adminAuthorized(user, required, time.Now()) {
+		if !adminAuthorized(user, required) {
 			SendJSONError(w, r, apperrors.ErrAdminAccessRequired)
 			// An authenticated non-admin probing the admin surface is a
 			// security signal worth keeping. Throttled so a scripted caller
@@ -88,31 +85,14 @@ func (p pattern) WithAdminAuthorization(required ...authz.Permission) pattern {
 	return p
 }
 
-// CallerHasPermission reports whether the authenticated caller holds permission
-// p under the SAME rules as the admin gate (DB-resolved permissions). Handlers
-// on shared multi-verb paths use it to enforce the write-tier permission the
-// path-level gate cannot: the route registry is path-only, so GET and POST on
-// /v1/admin/roles share ONE gate, which is
-// tagged with the read permission — the handler then requires the write
-// permission for mutating methods. Returns false if the auth middleware didn't
-// run.
-func CallerHasPermission(r *http.Request, p authz.Permission) bool {
-	user, ok := r.Context().Value(UserContextKey).(*models.User)
-	if !ok {
-		return false
-	}
-	return authz.Has(user, p, rolesCache, time.Now())
-}
-
-// adminAuthorized is the gate decision: the caller must hold admin.access plus
-// every required permission, DB-resolved from the roles cache. No seeded roles
-// (or a nil cache) means no one is authorized — fail closed.
-func adminAuthorized(user *models.User, required []authz.Permission, now time.Time) bool {
-	if !authz.Has(user, authz.PermAdminAccess, rolesCache, now) {
+// adminAuthorized is the gate decision: panel access plus every required
+// permission. Fails closed.
+func adminAuthorized(user *models.User, required []authz.Permission) bool {
+	if !authz.Has(user, authz.PermAdmin) {
 		return false
 	}
 	for _, req := range required {
-		if !authz.Has(user, req, rolesCache, now) {
+		if !authz.Has(user, req) {
 			return false
 		}
 	}

@@ -10,29 +10,16 @@ import (
 	"github.com/atharva-ng/crunch/internal/models"
 )
 
-// withRolesCache installs a roles cache for the gate to resolve against and
-// restores the previous one afterward.
-func withRolesCache(t *testing.T, roles []models.Role) {
-	t.Helper()
-	c, err := authz.NewRolesCacheFromRoles(roles)
-	if err != nil {
-		t.Fatalf("build roles cache: %v", err)
-	}
-	orig := rolesCache
-	SetRolesCache(c)
-	t.Cleanup(func() { rolesCache = orig })
-}
-
-// requestWithRoleUser builds a request carrying a full user (role + email) in
+// requestWithAccess builds a request carrying a user (role + permissions) in
 // context, as JWT auth would.
-func requestWithRoleUser(role, email string) *http.Request {
+func requestWithAccess(role, email string, perms ...string) *http.Request {
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	u := &models.User{Role: role, Email: email}
+	u := &models.User{Role: role, Email: email, Permissions: perms}
 	return r.WithContext(context.WithValue(r.Context(), UserContextKey, u))
 }
 
-// buildAdminRouteRBAC registers a route tagged with the given permissions.
-func buildAdminRouteRBAC(t *testing.T, path string, perms ...authz.Permission) http.Handler {
+// buildAdminRoute registers a route tagged with the given permissions.
+func buildGateRoute(t *testing.T, path string, perms ...authz.Permission) http.Handler {
 	t.Helper()
 	Handle(path, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -41,76 +28,44 @@ func buildAdminRouteRBAC(t *testing.T, path string, perms ...authz.Permission) h
 	return routes[path]
 }
 
-func TestAdminGate_BaselineAdminAccessPasses(t *testing.T) {
-	withRolesCache(t, authz.DefaultRoles())
-	h := buildAdminRouteRBAC(t, "/test/rbac-baseline")
-
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, requestWithRoleUser(models.RoleKeyApprover, "admin@x.com"))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("admin on baseline route: status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
+func TestAdminGate(t *testing.T) {
+	captureAuditInserts(t)
+	cases := []struct {
+		name  string
+		perms []authz.Permission
+		req   *http.Request
+		want  int
+	}{
+		{"admin on baseline", nil, requestWithAccess(models.RoleAdmin, "a@x.com"), http.StatusOK},
+		{"editor on editor route", []authz.Permission{authz.PermEditor}, requestWithAccess(models.RoleAdmin, "a@x.com", "editor"), http.StatusOK},
+		{"editor on approver route", []authz.Permission{authz.PermApprover}, requestWithAccess(models.RoleAdmin, "a@x.com", "editor"), http.StatusForbidden},
+		{"approver on superuser route", []authz.Permission{authz.PermSuperuser}, requestWithAccess(models.RoleAdmin, "a@x.com", "editor", "approver"), http.StatusForbidden},
+		{"superuser passes everything", []authz.Permission{authz.PermSuperuser, authz.PermApprover}, requestWithAccess(models.RoleSuperuser, "s@x.com"), http.StatusOK},
+		{"user role forbidden", nil, requestWithAccess(models.RoleUser, "u@x.com", "editor"), http.StatusForbidden},
+		{"unknown role forbidden", nil, requestWithAccess("approver", "u@x.com"), http.StatusForbidden},
+		{"empty role forbidden", nil, requestWithAccess("", "u@x.com"), http.StatusForbidden},
+	}
+	for i, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h := buildGateRoute(t, "/test/gate/"+string(rune('a'+i)), c.perms...)
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, c.req)
+			if rec.Code != c.want {
+				t.Fatalf("status = %d, want %d", rec.Code, c.want)
+			}
+		})
 	}
 }
 
-func TestAdminGate_AdminHoldsDomainPermission(t *testing.T) {
-	withRolesCache(t, authz.DefaultRoles())
-	h := buildAdminRouteRBAC(t, "/test/rbac-users", authz.PermUsersRead)
-
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, requestWithRoleUser(models.RoleKeyApprover, "admin@x.com"))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("admin on users.read route: status = %d, want 200", rec.Code)
-	}
-}
-
-func TestAdminGate_MissingRequiredPermIsForbiddenAndAudited(t *testing.T) {
-	withRolesCache(t, authz.DefaultRoles())
+func TestAdminGate_DenialIsAudited(t *testing.T) {
 	rows := captureAuditInserts(t)
-	h := buildAdminRouteRBAC(t, "/test/rbac-superonly", authz.PermRolesWrite)
-
+	h := buildGateRoute(t, "/test/gate-audit", authz.PermSuperuser)
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, requestWithRoleUser(models.RoleKeyApprover, "admin@x.com"))
+	h.ServeHTTP(rec, requestWithAccess(models.RoleAdmin, "denied-audit@x.com", "approver"))
 	if rec.Code != http.StatusForbidden {
-		t.Fatalf("admin on roles.write route: status = %d, want 403", rec.Code)
+		t.Fatalf("status = %d", rec.Code)
 	}
 	if len(*rows) != 1 || (*rows)[0].Status != http.StatusForbidden {
 		t.Errorf("denial must be audited as a 403 row, got %+v", *rows)
-	}
-}
-
-func TestAdminGate_SuperuserPassesEverything(t *testing.T) {
-	withRolesCache(t, authz.DefaultRoles())
-	h := buildAdminRouteRBAC(t, "/test/rbac-super-ok", authz.PermMigrationsRun, authz.PermUsersDelete)
-
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, requestWithRoleUser(models.RoleKeySuperuser, "root@x.com"))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("superuser on superuser-tier route: status = %d, want 200", rec.Code)
-	}
-}
-
-func TestAdminGate_UserRoleForbidden(t *testing.T) {
-	withRolesCache(t, authz.DefaultRoles())
-	h := buildAdminRouteRBAC(t, "/test/rbac-user-denied")
-
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, requestWithRoleUser(models.RoleKeyUser, "customer@x.com"))
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("customer role on admin route: status = %d, want 403", rec.Code)
-	}
-}
-
-func TestAdminGate_UnknownAndEmptyRoleForbidden(t *testing.T) {
-	withRolesCache(t, authz.DefaultRoles())
-
-	for name, role := range map[string]string{"unknown role": "ghost", "empty role": ""} {
-		t.Run(name, func(t *testing.T) {
-			h := buildAdminRouteRBAC(t, "/test/rbac-"+role+"-x")
-			rec := httptest.NewRecorder()
-			h.ServeHTTP(rec, requestWithRoleUser(role, "x@x.com"))
-			if rec.Code != http.StatusForbidden {
-				t.Fatalf("%s: status = %d, want 403 (fail closed)", name, rec.Code)
-			}
-		})
 	}
 }

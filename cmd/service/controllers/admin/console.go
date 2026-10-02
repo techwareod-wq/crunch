@@ -3,7 +3,6 @@ package admin
 import (
 	"net/http"
 	"strconv"
-	"time"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
 
@@ -17,37 +16,26 @@ import (
 // listAdminActions is a seam for tests (mirrors findUserByID in target.go).
 var listAdminActions = models.ListAdminActions
 
-// whoamiResponse identifies the acting admin and their effective capabilities.
-// It must never grow allowlist contents or other admins' identities: reaching
-// this endpoint already proves membership, enumerating it would leak the
-// roster. Permissions + Rank let the dashboard gate menu items by capability
-// instead of assuming binary admin (RBAC plan §6).
+// whoamiResponse identifies the acting admin and what they may do; the admin
+// UI gates menu items on Permissions. It never lists other admins.
 type whoamiResponse struct {
 	ID          string   `json:"id"`
 	Email       string   `json:"email"`
 	Name        string   `json:"name"`
 	Role        string   `json:"role"`
 	Permissions []string `json:"permissions"`
-	Rank        int      `json:"rank"`
 }
 
-// HandleAdminWhoami answers the dashboard's gate probe with the acting admin's
-// identity + resolved permissions/rank. Non-admins never reach this handler
-// (403 at the gate), which is the whole check.
+// HandleAdminWhoami answers the admin UI's gate probe. Non-admins never reach
+// it (403 at the gate).
 func HandleAdminWhoami(w http.ResponseWriter, r *http.Request) {
 	user := middleware.GetUserFromContext(r)
-	appCtx := config.GetAppContext(r)
-	perms := authz.EffectivePermissionKeys(user, appCtx.RolesCache, time.Now().UTC())
-	if perms == nil {
-		perms = []string{}
-	}
 	middleware.SendJSONResponse(w, r, http.StatusOK, whoamiResponse{
 		ID:          user.ID.Hex(),
 		Email:       user.Email,
 		Name:        user.Name,
 		Role:        user.Role,
-		Permissions: perms,
-		Rank:        authz.Rank(user, appCtx.RolesCache),
+		Permissions: authz.Effective(user),
 	})
 }
 

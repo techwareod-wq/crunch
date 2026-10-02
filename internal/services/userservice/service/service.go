@@ -111,7 +111,7 @@ func (svc *service) SyncUser(ctx context.Context, req dto.SyncUserRequest) error
 		ClerkID: req.ClerkID,
 		Email:   req.Email,
 		Name:    req.Name,
-		Role:    models.RoleKeyUser,
+		Role:    models.RoleUser,
 	}
 	return svc.store.CreateUser(ctx, user)
 }
@@ -137,9 +137,9 @@ func (svc *service) DeleteUser(ctx context.Context, clerkID string) (primitive.O
 	// Accepted-risk log (RBAC plan §7): the last superuser deleting their own
 	// Clerk account tombstones them outside the admin gate, so the last-holder
 	// guard never fires. Log loudly so a resulting lockout is diagnosable —
-	// recovery is a rolesmigrate re-seed.
-	if user.Role == models.RoleKeySuperuser {
-		log.Warn("superuser account deactivated via Clerk webhook — if this was the last superuser, recover with rolesmigrate -seed-admins",
+	// recovery is cmd/superuser.
+	if user.Role == models.RoleSuperuser {
+		log.Warn("superuser account deactivated via Clerk webhook — if this was the last superuser, recover with cmd/superuser",
 			"clerk_id", clerkID, "user_id", user.ID.Hex())
 	}
 

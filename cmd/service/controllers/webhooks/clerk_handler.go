@@ -1,14 +1,12 @@
 package webhooks
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 
 	"github.com/atharva-ng/crunch/internal/config"
 	"github.com/atharva-ng/crunch/internal/middleware"
-	"github.com/atharva-ng/crunch/internal/models"
 	"github.com/atharva-ng/crunch/internal/services/userservice/dto"
 	"github.com/atharva-ng/crunch/internal/util/log"
 	svix "github.com/svix/svix-webhooks/go"
@@ -112,15 +110,6 @@ func HandleClerkWebhook(w http.ResponseWriter, r *http.Request) {
 
 		log.Info("clerk webhook: user synced", "clerk_id", userData.ID, "event", event.Type)
 
-		// Staff invites (D-011): apply a pending invite's role. Runs on
-		// updated too (the email can arrive late) — Apply is idempotent, and a
-		// failure 500s so Svix retries.
-		if err := applyStaffInvite(r.Context(), appCtx, userData.ID); err != nil {
-			log.Error("clerk webhook: staff invite apply failed", "error", err, "clerk_id", userData.ID)
-			http.Error(w, "internal error", http.StatusInternalServerError)
-			return
-		}
-
 	case clerkEventUserDeleted:
 		var userData struct {
 			ID string `json:"id"`
@@ -144,16 +133,6 @@ func HandleClerkWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	middleware.SendJSONResponse(w, r, http.StatusOK, map[string]string{"status": "ok"})
-}
-
-// applyStaffInvite runs the invite role apply for the synced user. A missing
-// local user (tombstoned clerk_id) is a no-op.
-func applyStaffInvite(ctx context.Context, appCtx *config.AppContext, clerkID string) error {
-	found, user, err := models.FindUserByClerkID(ctx, clerkID)
-	if err != nil || !found {
-		return err
-	}
-	return appCtx.InternalServices.StaffInvites.Apply(ctx, user, "webhook")
 }
 
 func extractPrimaryEmail(data clerkUserData) string {

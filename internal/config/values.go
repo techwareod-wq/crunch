@@ -40,6 +40,18 @@ type WarehouseHubValues struct {
 	PublicBaseURL string `yaml:"publicBaseURL"`
 	// AdminBaseURL is the admin panel origin (links in staff emails).
 	AdminBaseURL string `yaml:"adminBaseURL"`
+	// Attributes tunes the attribute engine (spec 02).
+	Attributes AttributesValues `yaml:"attributes"`
+}
+
+// AttributesValues is the `warehousehub.attributes` block.
+type AttributesValues struct {
+	// CacheRefreshSeconds bounds how stale another instance's rules snapshot
+	// can be after a tree/industry write (the writer reloads at once).
+	CacheRefreshSeconds int `yaml:"cacheRefreshSeconds"`
+	// RecomputeBatchSize is how many warehouses one recompute_batch message
+	// evaluates.
+	RecomputeBatchSize int `yaml:"recomputeBatchSize"`
 }
 
 // CronValues configures the cron/time-trigger layer (internal/cron). Schedule
@@ -92,18 +104,11 @@ type ServerValues struct {
 	AllowedHosts []string `yaml:"allowedHosts"`
 }
 
-// AdminValues holds operational tuning for the /v1/admin surface. Access is
-// governed solely by the DB-backed RBAC roles (middleware.WithAdminAuthorization);
-// nothing here grants admin.
+// AdminValues holds operational tuning for the /v1/admin surface. Access
+// comes only from a user's role + permissions (internal/authz).
 type AdminValues struct {
-	// CacheRefreshSeconds is the interval at which the roles cache
-	// re-load from the DB (StartRefresh), bounding staleness across a fleet.
-	CacheRefreshSeconds int `yaml:"cacheRefreshSeconds"`
 	// Pagination bounds the admin list endpoints' page sizes.
 	Pagination AdminPaginationValues `yaml:"pagination"`
-	// StaffInviteExpiryDays is how long a staff invite stays usable (D-011);
-	// also sent to Clerk as the invitation lifetime.
-	StaffInviteExpiryDays int `yaml:"staffInviteExpiryDays"`
 }
 
 // AdminPaginationValues holds the default and maximum page sizes for the admin

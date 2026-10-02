@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/atharva-ng/crunch/internal/authz"
 	"github.com/atharva-ng/crunch/internal/models"
 )
 
@@ -48,7 +47,6 @@ func sha256Hex(b []byte) string {
 }
 
 func TestAudit_MutatingRequestByAdminIsRecorded(t *testing.T) {
-	withRolesCache(t, authz.DefaultRoles())
 	rows := captureAuditInserts(t)
 
 	Handle("/test/audit-mutation", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -62,7 +60,7 @@ func TestAudit_MutatingRequestByAdminIsRecorded(t *testing.T) {
 
 	r := httptest.NewRequest(http.MethodPost, "/test/audit-mutation", nil)
 	r.Header.Set(adminActionHeader, "demo.dispatch")
-	ctx := context.WithValue(r.Context(), UserContextKey, &models.User{Role: models.RoleKeyApprover, Email: "admin@x.com"})
+	ctx := context.WithValue(r.Context(), UserContextKey, &models.User{Role: models.RoleAdmin, Email: "admin@x.com"})
 	ctx = context.WithValue(ctx, DeserializerContextKey, body)
 	rec := httptest.NewRecorder()
 	routes["/test/audit-mutation"].ServeHTTP(rec, r.WithContext(ctx))
@@ -93,12 +91,11 @@ func TestAudit_MutatingRequestByAdminIsRecorded(t *testing.T) {
 }
 
 func TestAudit_AdminGetIsNotRecorded(t *testing.T) {
-	withRolesCache(t, authz.DefaultRoles())
 	rows := captureAuditInserts(t)
 	h := buildAdminRoute(t, "/test/audit-get-skip")
 
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, requestWithRoleUser(models.RoleKeyApprover, "admin@x.com"))
+	h.ServeHTTP(rec, requestWithAccess(models.RoleAdmin, "admin@x.com"))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -109,13 +106,12 @@ func TestAudit_AdminGetIsNotRecorded(t *testing.T) {
 }
 
 func TestAudit_DenialIsRecordedAndThrottled(t *testing.T) {
-	withRolesCache(t, authz.DefaultRoles())
 	rows := captureAuditInserts(t)
 	h := buildAdminRoute(t, "/test/audit-denial")
 
 	for i := 0; i < 3; i++ {
 		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, requestWithRoleUser(models.RoleKeyUser, "intruder@x.com"))
+		h.ServeHTTP(rec, requestWithAccess(models.RoleUser, "intruder@x.com"))
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("status = %d, want 403", rec.Code)
 		}
@@ -131,7 +127,6 @@ func TestAudit_DenialIsRecordedAndThrottled(t *testing.T) {
 }
 
 func TestAudit_SelfDecodedBodyIsCapturedWhenHandlerReadsIt(t *testing.T) {
-	withRolesCache(t, authz.DefaultRoles())
 	rows := captureAuditInserts(t)
 
 	raw := `{"userId":"aaaabbbbccccddddeeeeffff","itemId":"w1"}`
@@ -145,7 +140,7 @@ func TestAudit_SelfDecodedBodyIsCapturedWhenHandlerReadsIt(t *testing.T) {
 	})).WithAdminAuthorization()
 
 	r := httptest.NewRequest(http.MethodPatch, "/test/audit-selfdecode", strings.NewReader(raw))
-	ctx := context.WithValue(r.Context(), UserContextKey, &models.User{Role: models.RoleKeyApprover, Email: "admin@x.com"})
+	ctx := context.WithValue(r.Context(), UserContextKey, &models.User{Role: models.RoleAdmin, Email: "admin@x.com"})
 	rec := httptest.NewRecorder()
 	routes["/test/audit-selfdecode"].ServeHTTP(rec, r.WithContext(ctx))
 
@@ -162,7 +157,6 @@ func TestAudit_SelfDecodedBodyIsCapturedWhenHandlerReadsIt(t *testing.T) {
 }
 
 func TestAudit_QueryTargetIsRecordedOnDelete(t *testing.T) {
-	withRolesCache(t, authz.DefaultRoles())
 	rows := captureAuditInserts(t)
 
 	Handle("/test/audit-query-target", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -170,7 +164,7 @@ func TestAudit_QueryTargetIsRecordedOnDelete(t *testing.T) {
 	})).WithAdminAuthorization()
 
 	r := httptest.NewRequest(http.MethodDelete, "/test/audit-query-target?userId=1234567890abcdef12345678&scheduledArticleId=s1", nil)
-	ctx := context.WithValue(r.Context(), UserContextKey, &models.User{Role: models.RoleKeyApprover, Email: "admin@x.com"})
+	ctx := context.WithValue(r.Context(), UserContextKey, &models.User{Role: models.RoleAdmin, Email: "admin@x.com"})
 	rec := httptest.NewRecorder()
 	routes["/test/audit-query-target"].ServeHTTP(rec, r.WithContext(ctx))
 
@@ -183,7 +177,6 @@ func TestAudit_QueryTargetIsRecordedOnDelete(t *testing.T) {
 }
 
 func TestAudit_PanickingHandlerIsRecordedAs500AndRepanics(t *testing.T) {
-	withRolesCache(t, authz.DefaultRoles())
 	rows := captureAuditInserts(t)
 
 	Handle("/test/audit-panic", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -191,7 +184,7 @@ func TestAudit_PanickingHandlerIsRecordedAs500AndRepanics(t *testing.T) {
 	})).WithAdminAuthorization()
 
 	r := httptest.NewRequest(http.MethodPost, "/test/audit-panic", nil)
-	ctx := context.WithValue(r.Context(), UserContextKey, &models.User{Role: models.RoleKeyApprover, Email: "admin@x.com"})
+	ctx := context.WithValue(r.Context(), UserContextKey, &models.User{Role: models.RoleAdmin, Email: "admin@x.com"})
 
 	func() {
 		defer func() {
