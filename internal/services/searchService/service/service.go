@@ -69,6 +69,10 @@ func (s *svc) SetLogger(l domain.SearchLogger) {
 // --- search ---
 
 func (s *svc) Search(ctx context.Context, f domain.SearchFilters, v searchService.Viewer) (domain.SearchResponse, error) {
+	start := s.now()
+	if v.SessionID == "" {
+		v.SessionID = f.SessionID
+	}
 	cfg := s.cfg()
 	n, q, dropped, err := normalize(s.rules.Snapshot(), f, cfg)
 	if err != nil {
@@ -110,7 +114,7 @@ func (s *svc) Search(ctx context.Context, f domain.SearchFilters, v searchServic
 		resp.Radius.Message = fmt.Sprintf("No warehouses within %d km.", resp.Radius.UsedKm)
 	}
 	if !v.Quiet {
-		s.logSearch(resp, v)
+		s.logSearch(resp, v, s.now().Sub(start).Milliseconds())
 	}
 	return resp, nil
 }
@@ -316,21 +320,20 @@ func facets(res models.SearchResult) domain.SearchFacets {
 	return f
 }
 
-// logSearch hands the search to analytics in the background (never blocks
-// or fails the response).
-func (s *svc) logSearch(resp domain.SearchResponse, v searchService.Viewer) {
+// logSearch hands page 1 of a search to analytics in the background
+// (never blocks or fails the response). Later pages aren't logged (07).
+func (s *svc) logSearch(resp domain.SearchResponse, v searchService.Viewer, latencyMs int64) {
 	s.logMu.RLock()
 	l := s.logger
 	s.logMu.RUnlock()
-	if l == nil {
+	if l == nil || resp.Page > 1 {
 		return
 	}
 	e := domain.SearchEvent{
 		SearchID: resp.SearchID, At: s.now().UTC(), Source: "structured", Filters: resp.Applied.Filters,
-		Total: resp.Total, Degraded: resp.Degraded, UserID: v.UserID, Staff: v.Staff,
-	}
-	if resp.Radius != nil {
-		e.UsedKm = resp.Radius.UsedKm
+		ResolvedPoint: resp.Applied.ResolvedPoint, GeocodeSource: resp.Applied.GeocodeSource, Radius: resp.Radius,
+		Total: resp.Total, Page: resp.Page, LatencyMs: latencyMs, Degraded: resp.Degraded,
+		UserID: v.UserID, SessionID: v.SessionID, Staff: v.Staff,
 	}
 	go func() {
 		defer func() {

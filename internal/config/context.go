@@ -9,8 +9,10 @@ import (
 
 	"github.com/atharva-ng/crunch/internal/services/accountService"
 	"github.com/atharva-ng/crunch/internal/services/aiSearchService"
+	"github.com/atharva-ng/crunch/internal/services/analyticsService"
 	"github.com/atharva-ng/crunch/internal/services/attributeService"
 	"github.com/atharva-ng/crunch/internal/services/catalogService"
+	"github.com/atharva-ng/crunch/internal/services/enquiryService"
 	"github.com/atharva-ng/crunch/internal/services/searchService"
 	"github.com/atharva-ng/crunch/internal/services/userservice"
 )
@@ -43,6 +45,8 @@ type InternalServices struct {
 	CatalogService   catalogService.CatalogService
 	SearchService    searchService.SearchService
 	AISearchService  aiSearchService.AISearchService
+	EnquiryService   enquiryService.EnquiryService
+	AnalyticsService analyticsService.AnalyticsService
 }
 
 type AppContext struct {

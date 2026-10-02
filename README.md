@@ -34,7 +34,7 @@ Same layering as central (`internal/services/catalogService` is the real example
 4. **HTTP**: `cmd/service/controllers/<name>/{routes.go,handlers.go}`, registered in `loadAppAPIs` (`cmd/service/app-service.go`).
 5. **Async / cron**: handlers in `internal/services/asyncHandler/registry.go`, jobs in `internal/cron/jobs_*.go` (dark until switched on in values). A data cleaner for account deletion goes into `InjectDefaultServices`.
 
-WarehouseHub services: `attributeService`, `catalogService` (search, AI search, enquiries and analytics follow). Shared rules (evaluator, validators, price maths) are in `internal/warehousehub/domain`.
+WarehouseHub services: `attributeService`, `catalogService`, `searchService`, `aiSearchService`, `enquiryService`, `analyticsService`. Shared rules (evaluator, validators, price maths) are in `internal/warehousehub/domain`.
 
 ## Run locally
 

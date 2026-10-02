@@ -46,3 +46,17 @@ func BumpCounter(ctx context.Context, name string) (int64, error) {
 	}
 	return c.V, nil
 }
+
+// CounterAnalyticsRolledThrough is the last local day (YYYYMMDD) the
+// analytics rollup has written; the nightly run catches up from the day
+// after it (spec 07).
+const CounterAnalyticsRolledThrough = "analyticsRolledThrough"
+
+// RaiseCounter sets a counter to v unless it already holds more.
+func RaiseCounter(ctx context.Context, name string, v int64) error {
+	_, err := Collection(metaCountersCollection).UpdateOne(ctx,
+		bson.M{fieldID: name},
+		bson.M{"$max": bson.M{"v": v}},
+		options.Update().SetUpsert(true))
+	return err
+}

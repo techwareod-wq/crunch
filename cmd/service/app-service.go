@@ -10,8 +10,10 @@ import (
 
 	"github.com/atharva-ng/crunch/cmd/service/controllers/admin"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/aisearch"
+	"github.com/atharva-ng/crunch/cmd/service/controllers/analytics"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/attributes"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/catalog"
+	"github.com/atharva-ng/crunch/cmd/service/controllers/enquiries"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/healthcheck"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/search"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/users"
@@ -122,4 +124,6 @@ func loadAppAPIs(appCtx *config.AppContext) {
 	catalog.Handle(appCtx)
 	search.Handle(appCtx)
 	aisearch.Handle(appCtx)
+	enquiries.Handle(appCtx)
+	analytics.Handle(appCtx)
 }

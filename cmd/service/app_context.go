@@ -44,6 +44,9 @@ func ProvideAppContext(appCtx *config.AppContext) error {
 		models.EnsureWarehouseSearchIndexes,
 		models.EnsureGeocodeCacheIndexes,
 		models.EnsurePincodeIndexes,
+		models.EnsureEnquiryIndexes,
+		models.EnsureSearchEventIndexes,
+		models.EnsureSearchDailyIndexes,
 	} {
 		if err := ensure(context.Background()); err != nil {
 			return err

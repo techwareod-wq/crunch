@@ -5,11 +5,12 @@ import (
 	"time"
 
 	"github.com/atharva-ng/crunch/internal/models"
+	"github.com/atharva-ng/crunch/internal/services/analyticsService"
 	"github.com/atharva-ng/crunch/internal/services/attributeService"
 	"github.com/atharva-ng/crunch/internal/services/catalogService"
 )
 
-// WarehouseHub beats. Both are dark until switched on in values
+// WarehouseHub beats. All are dark until switched on in values
 // (cron.jobs.<name>).
 const (
 	// JobRecomputeSafetyNet re-runs recompute_all nightly for anything still
@@ -18,6 +19,10 @@ const (
 	// JobMediaGC sweeps unconfirmed uploads and long-unreferenced media
 	// (spec 03; switched on at launch, OP-06).
 	JobMediaGC JobName = "catalog_media_gc"
+	// JobAnalyticsRollup rolls yesterday's searches + enquiries into
+	// search_daily, catching up any missed day (spec 07; on at launch,
+	// OP-06).
+	JobAnalyticsRollup JobName = "analytics_rollup_daily"
 
 	warehouseHubSystemUser = "system"
 	warehouseHubCatchUp    = 6 * time.Hour
@@ -37,6 +42,13 @@ func warehouseHubJobs(_ *ServiceLocator) []Job {
 			Spec:    AtLocal("04:00"),
 			Resolve: resolveMediaGC,
 			Process: catalogService.ProcessMediaGC,
+			CatchUp: warehouseHubCatchUp,
+		},
+		{
+			Name:    JobAnalyticsRollup,
+			Spec:    AtLocal("00:20"),
+			Resolve: resolveAnalyticsRollup,
+			Process: analyticsService.ProcessRollupDaily,
 			CatchUp: warehouseHubCatchUp,
 		},
 	}
@@ -64,5 +76,16 @@ func resolveMediaGC(_ context.Context, occ Occurrence) ([]Unit, error) {
 		UserID:         warehouseHubSystemUser,
 		Payload:        struct{}{},
 		IdempotencyKey: UnitKey(JobMediaGC, occ.At.UTC().Format("20060102"), "sweep"),
+	}}, nil
+}
+
+// resolveAnalyticsRollup enqueues one rollup per day; the job itself
+// works out which days are still missing.
+func resolveAnalyticsRollup(_ context.Context, occ Occurrence) ([]Unit, error) {
+	run := occ.At.UTC().Format("20060102")
+	return []Unit{{
+		UserID:         warehouseHubSystemUser,
+		Payload:        analyticsService.RollupPayload{Run: run},
+		IdempotencyKey: UnitKey(JobAnalyticsRollup, run, "rollup"),
 	}}, nil
 }

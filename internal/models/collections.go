@@ -16,4 +16,7 @@ const (
 	warehouseRentsCollection     = "warehouse_rents"
 	geocodeCacheCollection       = "geocode_cache"
 	pincodesCollection           = "pincodes"
+	enquiriesCollection          = "enquiries"
+	searchEventsCollection       = "search_events"
+	searchDailyCollection        = "search_daily"
 )

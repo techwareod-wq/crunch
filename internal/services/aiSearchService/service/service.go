@@ -72,6 +72,9 @@ func millis(v, def int) time.Duration {
 // Search runs spec 05's pipeline. Only an empty query errors.
 func (s *svc) Search(ctx context.Context, req aiSearchService.Request, v searchService.Viewer) (aiSearchService.Response, error) {
 	start := s.now()
+	if v.SessionID == "" {
+		v.SessionID = strings.TrimSpace(req.SessionID)
+	}
 	cfg := s.cfg()
 	q := normalizeQuery(req.Q, cfg.MaxQueryChars)
 	if q == "" {
@@ -215,18 +218,18 @@ func (s *svc) logSearch(resp domain.SearchResponse, ai domain.SearchAI, v search
 	s.logMu.RLock()
 	l := s.logger
 	s.logMu.RUnlock()
-	if l == nil {
+	if l == nil || resp.Page > 1 {
 		return
 	}
 	e := domain.SearchEvent{
 		SearchID: resp.SearchID, At: s.now().UTC(), Source: "ai", Filters: resp.Applied.Filters,
-		Total: resp.Total, Degraded: resp.Degraded, UserID: v.UserID, Staff: v.Staff, AI: &ai,
-	}
-	if resp.Radius != nil {
-		e.UsedKm = resp.Radius.UsedKm
+		ResolvedPoint: resp.Applied.ResolvedPoint, GeocodeSource: resp.Applied.GeocodeSource, Radius: resp.Radius,
+		Total: resp.Total, Page: resp.Page, LatencyMs: ai.LatencyMs, Degraded: resp.Degraded,
+		UserID: v.UserID, SessionID: v.SessionID, Staff: v.Staff, AI: &ai,
 	}
 	if resp.Fallback != nil {
 		e.Fallback = resp.Fallback.Reason
+		e.FallbackCount = len(resp.Fallback.Results)
 	}
 	go func() {
 		defer func() {

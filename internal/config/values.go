@@ -48,6 +48,34 @@ type WarehouseHubValues struct {
 	Search SearchValues `yaml:"search"`
 	// AISearch tunes natural-language search (spec 05).
 	AISearch AISearchValues `yaml:"aisearch"`
+	// Enquiries tunes the enquiry form and inbox (spec 06).
+	Enquiries EnquiriesValues `yaml:"enquiries"`
+	// Analytics tunes search analytics (spec 07).
+	Analytics AnalyticsValues `yaml:"analytics"`
+}
+
+// EnquiriesValues is the `warehousehub.enquiries` block.
+type EnquiriesValues struct {
+	// MessageMaxLen caps the free-text requirement (D-102), in characters.
+	MessageMaxLen int `yaml:"messageMaxLen"`
+	// ListDefault / ListMax bound the inbox page sizes.
+	ListDefault int `yaml:"listDefault"`
+	ListMax     int `yaml:"listMax"`
+	// ExportMax caps the rows of one CSV export.
+	ExportMax int `yaml:"exportMax"`
+}
+
+// AnalyticsValues is the `warehousehub.analytics` block.
+type AnalyticsValues struct {
+	// Zone is the IANA zone whose calendar days the rollups and dashboards
+	// use.
+	Zone string `yaml:"zone"`
+	// TopDefault / TopMax bound the top / zero-result query lists.
+	TopDefault int `yaml:"topDefault"`
+	TopMax     int `yaml:"topMax"`
+	// LogDefault / LogMax bound the raw log page sizes.
+	LogDefault int `yaml:"logDefault"`
+	LogMax     int `yaml:"logMax"`
 }
 
 // AISearchValues is the `warehousehub.aisearch` block.

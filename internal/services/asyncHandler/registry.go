@@ -7,6 +7,7 @@ import (
 
 	"github.com/atharva-ng/crunch/internal/pipeline"
 	"github.com/atharva-ng/crunch/internal/services/aiSearchService"
+	"github.com/atharva-ng/crunch/internal/services/analyticsService"
 	"github.com/atharva-ng/crunch/internal/services/attributeService"
 	"github.com/atharva-ng/crunch/internal/services/catalogService"
 )
@@ -19,6 +20,7 @@ type ServiceLocator struct {
 	AttributeService attributeService.AttributeService
 	CatalogService   catalogService.CatalogService
 	AISearchService  aiSearchService.AISearchService
+	AnalyticsService analyticsService.AnalyticsService
 }
 
 // BuildProcessRegistry binds every process type to its service handler.
@@ -27,6 +29,7 @@ func BuildProcessRegistry(locator *ServiceLocator) Registry {
 	registerAttributeHandlers(registry, locator)
 	registerCatalogHandlers(registry, locator)
 	registerAISearchHandlers(registry, locator)
+	registerAnalyticsHandlers(registry, locator)
 	return registry
 }
 
@@ -60,6 +63,13 @@ func registerAISearchHandlers(registry Registry, locator *ServiceLocator) {
 	}))
 	registry.Register(aiSearchService.ProcessReembedAll, Typed(func(ctx context.Context, _ string, p aiSearchService.ReembedAllPayload) error {
 		return svc.ReembedAll(ctx, p)
+	}))
+}
+
+func registerAnalyticsHandlers(registry Registry, locator *ServiceLocator) {
+	svc := locator.AnalyticsService
+	registry.Register(analyticsService.ProcessRollupDaily, Typed(func(ctx context.Context, _ string, p analyticsService.RollupPayload) error {
+		return svc.RollupDaily(ctx, p)
 	}))
 }
 

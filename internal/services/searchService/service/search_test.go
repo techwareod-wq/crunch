@@ -339,6 +339,33 @@ func TestSearchLogs(t *testing.T) {
 	}
 }
 
+// Only page 1 is logged; the session id reaches the event but is never
+// echoed in the applied filters (07, D-105).
+func TestSearchLogsPageOneWithSession(t *testing.T) {
+	h := newHarness()
+	var wg sync.WaitGroup
+	l := &recLogger{wg: &wg}
+	h.svc.SetLogger(l)
+	wg.Add(1)
+	resp, err := h.svc.Search(ctx, domain.SearchFilters{Text: "cold", SessionID: "sess-9"}, searchService.Viewer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Applied.Filters.SessionID != "" {
+		t.Errorf("session id echoed: %+v", resp.Applied.Filters)
+	}
+	if _, err := h.svc.Search(ctx, domain.SearchFilters{Text: "cold", Page: 2}, searchService.Viewer{}); err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
+	time.Sleep(20 * time.Millisecond) // a page-2 log would land by now
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.ev) != 1 || l.ev[0].SessionID != "sess-9" || l.ev[0].Page != 1 {
+		t.Errorf("events = %+v", l.ev)
+	}
+}
+
 func TestGroupThousands(t *testing.T) {
 	for in, want := range map[float64]string{0: "0", 999: "999", 1000: "1,000", 1234567.5: "1,234,567.5", 10000: "10,000"} {
 		if got := groupThousands(in); got != want {

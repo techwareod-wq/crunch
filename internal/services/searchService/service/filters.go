@@ -18,6 +18,7 @@ var sorts = []string{domain.SortRelevance, domain.SortDistance, domain.SortPrice
 // are a ValidationError.
 func normalize(snap *domain.Snapshot, f domain.SearchFilters, cfg config.SearchValues) (domain.SearchFilters, models.SearchQuery, []string, error) {
 	n := f
+	n.SessionID = "" // analytics only (Viewer.SessionID)
 	dropped := []string{}
 	country := "IN"
 	if f.Location != nil {

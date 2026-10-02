@@ -16,15 +16,20 @@ import (
 	llmutil "github.com/atharva-ng/crunch/internal/providers/impl/llm"
 	"github.com/atharva-ng/crunch/internal/providers/impl/llm/anthropic"
 	"github.com/atharva-ng/crunch/internal/providers/interfaces"
+	"github.com/atharva-ng/crunch/internal/services/accountService"
 	accountsvc "github.com/atharva-ng/crunch/internal/services/accountService/service"
 	accountstore "github.com/atharva-ng/crunch/internal/services/accountService/store"
 	aisearchsvc "github.com/atharva-ng/crunch/internal/services/aiSearchService/service"
 	aisearchstore "github.com/atharva-ng/crunch/internal/services/aiSearchService/store"
+	analyticssvc "github.com/atharva-ng/crunch/internal/services/analyticsService/service"
+	analyticsstore "github.com/atharva-ng/crunch/internal/services/analyticsService/store"
 	asynchandler "github.com/atharva-ng/crunch/internal/services/asyncHandler"
 	attributesvc "github.com/atharva-ng/crunch/internal/services/attributeService/service"
 	attributestore "github.com/atharva-ng/crunch/internal/services/attributeService/store"
 	catalogsvc "github.com/atharva-ng/crunch/internal/services/catalogService/service"
 	catalogstore "github.com/atharva-ng/crunch/internal/services/catalogService/store"
+	enquirysvc "github.com/atharva-ng/crunch/internal/services/enquiryService/service"
+	enquirystore "github.com/atharva-ng/crunch/internal/services/enquiryService/store"
 	searchsvc "github.com/atharva-ng/crunch/internal/services/searchService/service"
 	searchstore "github.com/atharva-ng/crunch/internal/services/searchService/store"
 	usersvc "github.com/atharva-ng/crunch/internal/services/userservice/service"
@@ -128,19 +133,14 @@ func buildImageGenerator(appCtx *config.AppContext) interfaces.ImageGenerator {
 // queue. None yet; AI search (05) adds its own.
 var llmProcessTypes []pipeline.ProcessType
 
-// InjectDefaultServices wires the services: users, the account-deletion
-// cascade and the WarehouseHub services (attributes, then catalog, which
-// evaluates with the attribute rules, then search, which also serves the
-// catalog's 410 nearby list, then AI search on top of search).
+// InjectDefaultServices wires the services: users, the WarehouseHub
+// services (attributes, then catalog, which evaluates with the attribute
+// rules, then search, which also serves the catalog's 410 nearby list, then
+// AI search on top of search, then enquiries and analytics, which logs both
+// searches) and last the account-deletion cascade with the cleaners of
+// every service that stores user data (D-019).
 func InjectDefaultServices(appCtx *config.AppContext) error {
 	appCtx.InternalServices.UserService = usersvc.NewService(userstore.NewStore())
-
-	appCtx.InternalServices.ClerkAccounts = clerkaccounts.GetProvider()
-	appCtx.InternalServices.AccountService = accountsvc.NewService(
-		accountstore.NewStore(),
-		appCtx.InternalServices.ClerkAccounts,
-		nil, // no feature stores user data yet (enquiries add a cleaner, D-019)
-	)
 
 	attributes := attributesvc.NewService(
 		attributestore.NewStore(),
@@ -195,7 +195,28 @@ func InjectDefaultServices(appCtx *config.AppContext) error {
 		appCtx.InternalServices.Dispatcher,
 		aiValues,
 	)
+
+	appCtx.InternalServices.EnquiryService = enquirysvc.NewService(
+		enquirystore.NewStore(),
+		changelog.New(),
+		appCtx.Config.Values.WarehouseHub,
+		appCtx.Config.AWS,
+	)
+	analytics := analyticssvc.NewService(analyticsstore.NewStore(), appCtx.Config.Values.WarehouseHub.Analytics)
+	appCtx.InternalServices.AnalyticsService = analytics
+	search.SetLogger(analytics)
+	appCtx.InternalServices.AISearchService.SetLogger(analytics)
 	log.Info("Injected WarehouseHub services")
+
+	appCtx.InternalServices.ClerkAccounts = clerkaccounts.GetProvider()
+	appCtx.InternalServices.AccountService = accountsvc.NewService(
+		accountstore.NewStore(),
+		appCtx.InternalServices.ClerkAccounts,
+		[]accountService.DataCleaner{
+			appCtx.InternalServices.EnquiryService.Cleaner(),
+			analytics.Cleaner(),
+		},
+	)
 
 	return nil
 }
@@ -205,6 +226,7 @@ func buildServiceLocator(appCtx *config.AppContext) *asynchandler.ServiceLocator
 		AttributeService: appCtx.InternalServices.AttributeService,
 		CatalogService:   appCtx.InternalServices.CatalogService,
 		AISearchService:  appCtx.InternalServices.AISearchService,
+		AnalyticsService: appCtx.InternalServices.AnalyticsService,
 	}
 }
 

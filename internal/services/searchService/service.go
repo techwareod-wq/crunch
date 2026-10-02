@@ -36,6 +36,8 @@ func Invalidf(format string, a ...any) error {
 type Viewer struct {
 	UserID string
 	Staff  bool
+	// SessionID is the visitor's anonymous session (D-105).
+	SessionID string
 	// Quiet skips the search log: AI search (05) logs its own, richer event.
 	Quiet bool
 }

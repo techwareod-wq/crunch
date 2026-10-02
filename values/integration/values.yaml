@@ -99,6 +99,11 @@ cron:
     # (spec 03). Switched on at launch (OP-06).
     catalog_media_gc:
       enabled: false
+    # Nightly search analytics rollup (spec 07): yesterday plus any missed
+    # days still inside the 90-day raw window. Switched on at launch (OP-06).
+    analytics_rollup_daily:
+      enabled: false
+      at: "00:20"
 
 # WarehouseHub feature tunables. Each service adds its own sub-block
 # (attributes, catalog, search, aisearch, enquiries, analytics) as it lands.
@@ -173,3 +178,20 @@ warehousehub:
     # Atlas Vector Search index (deploy/ATLAS_INDEXES.md).
     vectorIndex: wh_embedding
     vectorNumCandidates: 200
+  enquiries:
+    # Free-text requirement limit (D-102), in characters.
+    messageMaxLen: 4000
+    # Inbox page sizes.
+    listDefault: 25
+    listMax: 100
+    # Max rows in one CSV export.
+    exportMax: 10000
+  analytics:
+    # Calendar days (rollups, dashboards) are local to this zone.
+    zone: "Asia/Kolkata"
+    # Top / zero-result query lists.
+    topDefault: 50
+    topMax: 200
+    # Raw search log page sizes.
+    logDefault: 50
+    logMax: 200

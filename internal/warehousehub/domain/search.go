@@ -60,10 +60,13 @@ type SearchFilters struct {
 	// units. On a range field, min means "max ≥ min" and max "min ≤ max".
 	Ranges map[string]MinMax `json:"ranges,omitempty"`
 	// Text is the raw NL query (05: logging / fallback).
-	Text  string `json:"text,omitempty"`
-	Sort  string `json:"sort,omitempty"`
-	Page  int    `json:"page,omitempty"`
-	Limit int    `json:"limit,omitempty"`
+	Text string `json:"text,omitempty"`
+	// SessionID is the visitor's anonymous session, carried to analytics
+	// (D-105); never echoed in applied filters.
+	SessionID string `json:"sessionId,omitempty"`
+	Sort      string `json:"sort,omitempty"`
+	Page      int    `json:"page,omitempty"`
+	Limit     int    `json:"limit,omitempty"`
 }
 
 // SearchLocation is one of postal code, place text or a point.
@@ -200,24 +203,31 @@ type SearchAI struct {
 	Notes     []string `json:"notes"`
 }
 
-// SearchEvent is one logged search (07).
+// SearchEvent is one logged search (07). Only page 1 is logged.
 type SearchEvent struct {
 	SearchID string
 	At       time.Time
 	// Source: "structured" or "ai".
-	Source   string
-	Filters  SearchFilters
-	Total    int64
-	UsedKm   int
-	Degraded []string
+	Source        string
+	Filters       SearchFilters
+	ResolvedPoint *LatLng
+	GeocodeSource string
+	Radius        *SearchRadius
+	Total         int64
+	Page          int
+	LatencyMs     int64
+	Degraded      []string
 	// UserID is empty for anonymous searches; Staff marks admin users so
-	// analytics can exclude them.
-	UserID string
-	Staff  bool
+	// analytics can exclude them. SessionID is the visitor's anonymous
+	// session (D-105).
+	UserID    string
+	SessionID string
+	Staff     bool
 	// AI is set for natural-language searches (05); Fallback names the
-	// similar-matches reason when they were added.
-	AI       *SearchAI
-	Fallback string
+	// similar-matches reason when they were added, FallbackCount how many.
+	AI            *SearchAI
+	Fallback      string
+	FallbackCount int
 }
 
 // SearchLogger records searches (implemented by analytics, 07). Called in
