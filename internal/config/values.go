@@ -27,13 +27,13 @@ type Values struct {
 	LLM         LLMValues         `yaml:"llm"`
 	APIs        APIValues         `yaml:"apis"`
 	Cron        CronValues        `yaml:"cron"`
-	// WarehouseHub holds the WarehouseHub feature modules' tunables. Each
-	// module owns one sub-block.
+	// WarehouseHub holds the WarehouseHub services' tunables. Each
+	// service owns one sub-block.
 	WarehouseHub WarehouseHubValues `yaml:"warehousehub"`
 }
 
-// WarehouseHubValues is the values `warehousehub:` block. Module sub-blocks
-// are added here as each module lands.
+// WarehouseHubValues is the values `warehousehub:` block. Service sub-blocks
+// are added here as each service lands.
 type WarehouseHubValues struct {
 	// PublicBaseURL is the public site origin (listing links, JSON-LD,
 	// sitemap). Empty until D-005 (domain) is resolved.

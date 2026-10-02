@@ -8,7 +8,7 @@ import (
 	"github.com/atharva-ng/crunch/internal/middleware"
 )
 
-// Handle registers the platform /v1/admin/* routes (feature modules register
+// Handle registers the platform /v1/admin/* routes (feature controllers register
 // their own). Every route chains WithAdminAuthorization inside
 // WithJWTAuthentication (last chained runs first, so JWT populates the user
 // before the permission check) and is tagged with what it needs on top of

@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"github.com/atharva-ng/crunch/internal/models"
 	"math"
 	"slices"
 	"testing"
@@ -14,45 +15,45 @@ import (
 //	├─ cold_storage: temperature* (°C), humidity, temp_type (pick)
 //	│   └─ temp_control: temperature_range* (°C)
 //	└─ hazmat: dg_classes* (multi), owner_consent (bool)
-func fixtureNodes() []Node {
-	pub := func(f Field) Field { f.Public, f.Filterable = true, true; return f }
-	temp := &UnitSpec{Family: DimTemp, Input: []string{UnitC, UnitF}}
-	return []Node{
+func fixtureNodes() []models.AttributeNode {
+	pub := func(f models.AttributeField) models.AttributeField { f.Public, f.Filterable = true, true; return f }
+	temp := &models.UnitSpec{Family: DimTemp, Input: []string{UnitC, UnitF}}
+	return []models.AttributeNode{
 		RootNode(),
-		{Key: "infrastructure", ParentKey: RootKey, Name: "Infrastructure", Order: 1, Public: true, Fields: []Field{
-			pub(Field{Key: "dock_doors", Name: "Dock doors", Type: TypeNumber, Unit: &UnitSpec{Family: DimCount}, Order: 1}),
-			pub(Field{Key: "dock_ratio", Name: "Dock ratio", Type: TypeRatio, Order: 2,
-				Ratio: &RatioSpec{Top: "infrastructure.dock_doors", Bottom: "warehouse.total_area", Per: 10000, BottomUnit: UnitSqft}}),
+		{Key: "infrastructure", ParentKey: RootKey, Name: "Infrastructure", Order: 1, Public: true, Fields: []models.AttributeField{
+			pub(models.AttributeField{Key: "dock_doors", Name: "Dock doors", Type: TypeNumber, Unit: &models.UnitSpec{Family: DimCount}, Order: 1}),
+			pub(models.AttributeField{Key: "dock_ratio", Name: "Dock ratio", Type: TypeRatio, Order: 2,
+				Ratio: &models.RatioSpec{Top: "infrastructure.dock_doors", Bottom: "warehouse.total_area", Per: 10000, BottomUnit: UnitSqft}}),
 		}},
-		{Key: "cold_storage", ParentKey: RootKey, Name: "Cold storage", Order: 2, Public: true, Filterable: true, Fields: []Field{
-			pub(Field{Key: "temperature", Name: "Temperature", Type: TypeNumber, Unit: temp, Required: true, Order: 1}),
-			pub(Field{Key: "humidity", Name: "Humidity", Type: TypeNumber, Order: 2}),
-			pub(Field{Key: "temp_type", Name: "Temperature type", Type: TypePick, Order: 3, Options: []Option{
+		{Key: "cold_storage", ParentKey: RootKey, Name: "Cold storage", Order: 2, Public: true, Filterable: true, Fields: []models.AttributeField{
+			pub(models.AttributeField{Key: "temperature", Name: "Temperature", Type: TypeNumber, Unit: temp, Required: true, Order: 1}),
+			pub(models.AttributeField{Key: "humidity", Name: "Humidity", Type: TypeNumber, Order: 2}),
+			pub(models.AttributeField{Key: "temp_type", Name: "Temperature type", Type: TypePick, Order: 3, Options: []models.FieldOption{
 				{Key: "chilled", Label: "Chilled"}, {Key: "frozen", Label: "Frozen"}}}),
 		}},
-		{Key: "temp_control", ParentKey: "cold_storage", Name: "Temperature control", Order: 1, Public: true, Filterable: true, Fields: []Field{
-			pub(Field{Key: "temperature_range", Name: "Range", Type: TypeRange, Unit: temp, Required: true, Order: 1}),
+		{Key: "temp_control", ParentKey: "cold_storage", Name: "Temperature control", Order: 1, Public: true, Filterable: true, Fields: []models.AttributeField{
+			pub(models.AttributeField{Key: "temperature_range", Name: "Range", Type: TypeRange, Unit: temp, Required: true, Order: 1}),
 		}},
-		{Key: "hazmat", ParentKey: RootKey, Name: "Hazmat", Order: 3, Public: true, Filterable: true, Fields: []Field{
-			pub(Field{Key: "dg_classes", Name: "DG classes", Type: TypeMulti, Required: true, Order: 1, Options: []Option{
+		{Key: "hazmat", ParentKey: RootKey, Name: "Hazmat", Order: 3, Public: true, Filterable: true, Fields: []models.AttributeField{
+			pub(models.AttributeField{Key: "dg_classes", Name: "DG classes", Type: TypeMulti, Required: true, Order: 1, Options: []models.FieldOption{
 				{Key: "c3", Label: "3"}, {Key: "c8", Label: "8"}}}),
-			pub(Field{Key: "owner_consent", Name: "Owner consent", Type: TypeBool, Order: 2}),
+			pub(models.AttributeField{Key: "owner_consent", Name: "Owner consent", Type: TypeBool, Order: 2}),
 		}},
 	}
 }
 
-func fixtureSnap(inds ...Industry) *Snapshot { return NewSnapshot(7, fixtureNodes(), inds) }
+func fixtureSnap(inds ...models.Industry) *Snapshot { return NewSnapshot(7, fixtureNodes(), inds) }
 
-func val(v any) *FieldValue { return &FieldValue{V: v} }
+func val(v any) *models.FieldValue { return &models.FieldValue{V: v} }
 
 // baseAttrs: a complete live listing, 10,000 sq ft, cold storage yes.
-func baseAttrs() Attributes {
-	return Attributes{
-		RootKey: {Status: StatusYes, Fields: map[string]*FieldValue{
-			"total_area": val(Area{Value: 10000, Unit: UnitSqft, Sqm: 10000 * SqmPerSqft}),
+func baseAttrs() models.Attributes {
+	return models.Attributes{
+		RootKey: {Status: StatusYes, Fields: map[string]*models.FieldValue{
+			"total_area": val(models.Area{Value: 10000, Unit: UnitSqft, Sqm: 10000 * SqmPerSqft}),
 		}},
-		"infrastructure": {Status: StatusYes, Fields: map[string]*FieldValue{"dock_doors": val(4.0)}},
-		"cold_storage": {Status: StatusYes, Fields: map[string]*FieldValue{
+		"infrastructure": {Status: StatusYes, Fields: map[string]*models.FieldValue{"dock_doors": val(4.0)}},
+		"cold_storage": {Status: StatusYes, Fields: map[string]*models.FieldValue{
 			"temperature": val(-18.0), "humidity": nil, "temp_type": val("frozen"),
 		}},
 	}
@@ -60,13 +61,13 @@ func baseAttrs() Attributes {
 
 func TestEffectiveState(t *testing.T) {
 	s := fixtureSnap()
-	a := Attributes{
+	a := models.Attributes{
 		"cold_storage": {Status: StatusUnknown},
 		"temp_control": {Status: StatusYes}, // parent not yes → forced no
 		"hazmat":       {Status: StatusYes},
 	}
 	r := Evaluate(s, a, time.Time{})
-	want := map[string]NodeStatus{RootKey: StatusYes, "infrastructure": StatusNo, "cold_storage": StatusUnknown, "temp_control": StatusNo, "hazmat": StatusYes}
+	want := map[string]models.NodeStatus{RootKey: StatusYes, "infrastructure": StatusNo, "cold_storage": StatusUnknown, "temp_control": StatusNo, "hazmat": StatusYes}
 	for k, w := range want {
 		if r.State[k] != w {
 			t.Errorf("%s = %s, want %s", k, r.State[k], w)
@@ -78,39 +79,39 @@ func TestConditionTable(t *testing.T) {
 	s := fixtureSnap()
 	cases := []struct {
 		name  string
-		edit  func(Attributes)
-		cond  Condition
+		edit  func(models.Attributes)
+		cond  models.Condition
 		want  Tri
 		about string
 	}{
-		{"is_yes yes", nil, Condition{Node: "cold_storage", Cmp: CmpIsYes}, TriTrue, ""},
-		{"is_yes absent", nil, Condition{Node: "hazmat", Cmp: CmpIsYes}, TriFalse, "D-133 absent = no"},
-		{"is_yes unknown", func(a Attributes) { a["hazmat"] = NodeState{Status: StatusUnknown} }, Condition{Node: "hazmat", Cmp: CmpIsYes}, TriUnknown, ""},
-		{"is_yes ancestor not yes", func(a Attributes) {
-			a["cold_storage"] = NodeState{Status: StatusUnknown}
-			a["temp_control"] = NodeState{Status: StatusYes}
-		}, Condition{Node: "temp_control", Cmp: CmpIsYes}, TriFalse, "D-123: forced no under an unknown parent"},
-		{"field on no node", nil, Condition{Node: "hazmat", Field: "owner_consent", Cmp: CmpEq, Value: true}, TriFalse, ""},
-		{"field on unknown node", func(a Attributes) { a["hazmat"] = NodeState{Status: StatusUnknown} }, Condition{Node: "hazmat", Field: "owner_consent", Cmp: CmpEq, Value: true}, TriUnknown, ""},
-		{"optional null → F", nil, Condition{Node: "cold_storage", Field: "humidity", Cmp: CmpLte, Value: 60.0}, TriFalse, "D-125"},
-		{"optional absent → F", func(a Attributes) { delete(a["cold_storage"].Fields, "humidity") }, Condition{Node: "cold_storage", Field: "humidity", Cmp: CmpLte, Value: 60.0}, TriFalse, ""},
-		{"required missing → U", func(a Attributes) { delete(a["cold_storage"].Fields, "temperature") }, Condition{Node: "cold_storage", Field: "temperature", Cmp: CmpLte, Value: -10.0}, TriUnknown, "D-127"},
-		{"number lte T", nil, Condition{Node: "cold_storage", Field: "temperature", Cmp: CmpLte, Value: -10.0}, TriTrue, ""},
-		{"number gte F", nil, Condition{Node: "cold_storage", Field: "temperature", Cmp: CmpGte, Value: 0.0}, TriFalse, ""},
-		{"pick in", nil, Condition{Node: "cold_storage", Field: "temp_type", Cmp: CmpIn, Value: []string{"chilled", "frozen"}}, TriTrue, ""},
-		{"pick eq F", nil, Condition{Node: "cold_storage", Field: "temp_type", Cmp: CmpEq, Value: "chilled"}, TriFalse, ""},
-		{"range can reach", func(a Attributes) {
-			a["temp_control"] = NodeState{Status: StatusYes, Fields: map[string]*FieldValue{"temperature_range": val(Range{Min: 2, Max: 8})}}
-		}, Condition{Node: "temp_control", Field: "temperature_range", Cmp: CmpLte, Value: 4.0}, TriTrue, "min ≤ v"},
-		{"multi contains_all", func(a Attributes) {
-			a["hazmat"] = NodeState{Status: StatusYes, Fields: map[string]*FieldValue{"dg_classes": val([]string{"c3", "c8"})}}
-		}, Condition{Node: "hazmat", Field: "dg_classes", Cmp: CmpContainsAll, Value: []string{"c3", "c8"}}, TriTrue, ""},
-		{"multi in no overlap", func(a Attributes) {
-			a["hazmat"] = NodeState{Status: StatusYes, Fields: map[string]*FieldValue{"dg_classes": val([]string{"c3"})}}
-		}, Condition{Node: "hazmat", Field: "dg_classes", Cmp: CmpIn, Value: []string{"c8"}}, TriFalse, ""},
-		{"area gte", nil, Condition{Node: RootKey, Field: "total_area", Cmp: CmpGte, Value: 900.0}, TriTrue, "sq m"},
-		{"ratio computed", nil, Condition{Node: "infrastructure", Field: "dock_ratio", Cmp: CmpGte, Value: 4.0}, TriTrue, ""},
-		{"ratio missing input → U", func(a Attributes) { delete(a["infrastructure"].Fields, "dock_doors") }, Condition{Node: "infrastructure", Field: "dock_ratio", Cmp: CmpGte, Value: 1.0}, TriUnknown, "D-134"},
+		{"is_yes yes", nil, models.Condition{Node: "cold_storage", Cmp: CmpIsYes}, TriTrue, ""},
+		{"is_yes absent", nil, models.Condition{Node: "hazmat", Cmp: CmpIsYes}, TriFalse, "D-133 absent = no"},
+		{"is_yes unknown", func(a models.Attributes) { a["hazmat"] = models.NodeState{Status: StatusUnknown} }, models.Condition{Node: "hazmat", Cmp: CmpIsYes}, TriUnknown, ""},
+		{"is_yes ancestor not yes", func(a models.Attributes) {
+			a["cold_storage"] = models.NodeState{Status: StatusUnknown}
+			a["temp_control"] = models.NodeState{Status: StatusYes}
+		}, models.Condition{Node: "temp_control", Cmp: CmpIsYes}, TriFalse, "D-123: forced no under an unknown parent"},
+		{"field on no node", nil, models.Condition{Node: "hazmat", Field: "owner_consent", Cmp: CmpEq, Value: true}, TriFalse, ""},
+		{"field on unknown node", func(a models.Attributes) { a["hazmat"] = models.NodeState{Status: StatusUnknown} }, models.Condition{Node: "hazmat", Field: "owner_consent", Cmp: CmpEq, Value: true}, TriUnknown, ""},
+		{"optional null → F", nil, models.Condition{Node: "cold_storage", Field: "humidity", Cmp: CmpLte, Value: 60.0}, TriFalse, "D-125"},
+		{"optional absent → F", func(a models.Attributes) { delete(a["cold_storage"].Fields, "humidity") }, models.Condition{Node: "cold_storage", Field: "humidity", Cmp: CmpLte, Value: 60.0}, TriFalse, ""},
+		{"required missing → U", func(a models.Attributes) { delete(a["cold_storage"].Fields, "temperature") }, models.Condition{Node: "cold_storage", Field: "temperature", Cmp: CmpLte, Value: -10.0}, TriUnknown, "D-127"},
+		{"number lte T", nil, models.Condition{Node: "cold_storage", Field: "temperature", Cmp: CmpLte, Value: -10.0}, TriTrue, ""},
+		{"number gte F", nil, models.Condition{Node: "cold_storage", Field: "temperature", Cmp: CmpGte, Value: 0.0}, TriFalse, ""},
+		{"pick in", nil, models.Condition{Node: "cold_storage", Field: "temp_type", Cmp: CmpIn, Value: []string{"chilled", "frozen"}}, TriTrue, ""},
+		{"pick eq F", nil, models.Condition{Node: "cold_storage", Field: "temp_type", Cmp: CmpEq, Value: "chilled"}, TriFalse, ""},
+		{"range can reach", func(a models.Attributes) {
+			a["temp_control"] = models.NodeState{Status: StatusYes, Fields: map[string]*models.FieldValue{"temperature_range": val(models.Range{Min: 2, Max: 8})}}
+		}, models.Condition{Node: "temp_control", Field: "temperature_range", Cmp: CmpLte, Value: 4.0}, TriTrue, "min ≤ v"},
+		{"multi contains_all", func(a models.Attributes) {
+			a["hazmat"] = models.NodeState{Status: StatusYes, Fields: map[string]*models.FieldValue{"dg_classes": val([]string{"c3", "c8"})}}
+		}, models.Condition{Node: "hazmat", Field: "dg_classes", Cmp: CmpContainsAll, Value: []string{"c3", "c8"}}, TriTrue, ""},
+		{"multi in no overlap", func(a models.Attributes) {
+			a["hazmat"] = models.NodeState{Status: StatusYes, Fields: map[string]*models.FieldValue{"dg_classes": val([]string{"c3"})}}
+		}, models.Condition{Node: "hazmat", Field: "dg_classes", Cmp: CmpIn, Value: []string{"c8"}}, TriFalse, ""},
+		{"area gte", nil, models.Condition{Node: RootKey, Field: "total_area", Cmp: CmpGte, Value: 900.0}, TriTrue, "sq m"},
+		{"ratio computed", nil, models.Condition{Node: "infrastructure", Field: "dock_ratio", Cmp: CmpGte, Value: 4.0}, TriTrue, ""},
+		{"ratio missing input → U", func(a models.Attributes) { delete(a["infrastructure"].Fields, "dock_doors") }, models.Condition{Node: "infrastructure", Field: "dock_ratio", Cmp: CmpGte, Value: 1.0}, TriUnknown, "D-134"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -136,21 +137,21 @@ func TestDockRatio(t *testing.T) {
 }
 
 func TestVerdicts(t *testing.T) {
-	ind := func(key string, req, pref []Condition) Industry {
-		return Industry{Key: key, Name: key, Required: req, Preferred: pref}
+	ind := func(key string, req, pref []models.Condition) models.Industry {
+		return models.Industry{Key: key, Name: key, Required: req, Preferred: pref}
 	}
-	coldYes := Condition{Node: "cold_storage", Cmp: CmpIsYes}
-	hazYes := Condition{Node: "hazmat", Cmp: CmpIsYes}
-	humid := Condition{Node: "cold_storage", Field: "humidity", Cmp: CmpLte, Value: 60.0}
-	tcYes := Condition{Node: "temp_control", Cmp: CmpIsYes}
+	coldYes := models.Condition{Node: "cold_storage", Cmp: CmpIsYes}
+	hazYes := models.Condition{Node: "hazmat", Cmp: CmpIsYes}
+	humid := models.Condition{Node: "cold_storage", Field: "humidity", Cmp: CmpLte, Value: 60.0}
+	tcYes := models.Condition{Node: "temp_control", Cmp: CmpIsYes}
 	s := fixtureSnap(
-		ind("fit", []Condition{coldYes}, nil),
-		ind("notfit", []Condition{hazYes}, nil),
-		ind("partial", []Condition{coldYes}, []Condition{humid}), // null humidity → F (D-125)
-		ind("unverified", []Condition{coldYes}, []Condition{tcYes}),
+		ind("fit", []models.Condition{coldYes}, nil),
+		ind("notfit", []models.Condition{hazYes}, nil),
+		ind("partial", []models.Condition{coldYes}, []models.Condition{humid}), // null humidity → F (D-125)
+		ind("unverified", []models.Condition{coldYes}, []models.Condition{tcYes}),
 	)
 	a := baseAttrs()
-	a["temp_control"] = NodeState{Status: StatusUnknown}
+	a["temp_control"] = models.NodeState{Status: StatusUnknown}
 	r := Evaluate(s, a, time.Time{})
 	want := map[string]Verdict{"fit": VerdictFit, "notfit": VerdictNotFit, "partial": VerdictPartial, "unverified": VerdictUnverified}
 	for k, w := range want {
@@ -167,8 +168,8 @@ func TestProjectionAndNeedsInfo(t *testing.T) {
 	s := fixtureSnap()
 	a := baseAttrs()
 	delete(a["cold_storage"].Fields, "temperature") // required missing (D-127)
-	a["temp_control"] = NodeState{Status: StatusUnknown}
-	a["hazmat"] = NodeState{Status: StatusYes, Fields: map[string]*FieldValue{
+	a["temp_control"] = models.NodeState{Status: StatusUnknown}
+	a["hazmat"] = models.NodeState{Status: StatusYes, Fields: map[string]*models.FieldValue{
 		"dg_classes": val([]string{"c3", "c8"}), "owner_consent": val(true),
 	}}
 	now := time.Unix(1700000000, 0).UTC()

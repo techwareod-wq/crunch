@@ -22,16 +22,19 @@ Extracted from `central` with every SEO, billing and company/teams feature remov
 
 ## Adding a feature
 
-A feature is a **module** (`internal/modules`). It can add:
+Same layering as central (`internal/services/catalogService` is the real example):
 
-- async handlers (and say which ones go on the LLM queue)
-- cron jobs
-- HTTP routes
-- a data cleaner for account deletion
+1. **Model**: struct + indexes + queries in `internal/models/<name>.go`; ensure the indexes in `cmd/service/app_context.go`.
+2. **Service** in `internal/services/<name>Service/`:
+   - `service.go`: the interface, errors, request/payload types, process types
+   - `store/`: a `Store` interface + thin wrapper over `models.*`
+   - `service/`: the implementation (`NewService(store, deps…)`)
+   - `dto/`: response shapes
+3. **Wire it**: a field on `config.InternalServices`, built in `providers.InjectDefaultServices`.
+4. **HTTP**: `cmd/service/controllers/<name>/{routes.go,handlers.go}`, registered in `loadAppAPIs` (`cmd/service/app-service.go`).
+5. **Async / cron**: handlers in `internal/services/asyncHandler/registry.go`, jobs in `internal/cron/jobs_*.go` (dark until switched on in values). A data cleaner for account deletion goes into `InjectDefaultServices`.
 
-Write a module (embed `modules.Base`; `internal/modules/attributes` is the real example), then add one line to `cmd/service/modules.go`. You don't need to edit any platform package.
-
-The WarehouseHub feature modules live in `internal/modules/{attributes,catalog,search,aisearch,enquiries,analytics}`; their shared types are in `internal/warehousehub/domain`.
+WarehouseHub services: `attributeService`, `catalogService` (search, AI search, enquiries and analytics follow). Shared rules (evaluator, validators, price maths) are in `internal/warehousehub/domain`.
 
 ## Run locally
 

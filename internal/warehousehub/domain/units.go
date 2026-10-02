@@ -2,21 +2,20 @@ package domain
 
 import (
 	"fmt"
+	"github.com/atharva-ng/crunch/internal/models"
 	"strings"
 )
 
-// Dimension is the physical quantity a number/range attribute measures. Every
-// dimension has one canonical unit; answers store `v` in it and keep what the
-// editor typed in `raw` (spec 00 Units).
-type Dimension string
-
+// Unit families (Dimension, models.Dimension). Every family has one
+// canonical unit; values store `v` in it and keep what the editor typed in
+// `raw` (spec 00 Units).
 const (
-	DimArea   Dimension = "area"   // canonical sqm
-	DimTemp   Dimension = "temp"   // canonical C
-	DimLoad   Dimension = "load"   // canonical t/m2
-	DimMass   Dimension = "mass"   // canonical MT
-	DimLength Dimension = "length" // canonical m
-	DimCount  Dimension = "count"  // unitless
+	DimArea   models.Dimension = "area"   // canonical sqm
+	DimTemp   models.Dimension = "temp"   // canonical C
+	DimLoad   models.Dimension = "load"   // canonical t/m2
+	DimMass   models.Dimension = "mass"   // canonical MT
+	DimLength models.Dimension = "length" // canonical m
+	DimCount  models.Dimension = "count"  // unitless
 )
 
 // Unit symbols accepted on input.
@@ -39,7 +38,7 @@ const MPerFt = 0.3048
 
 // unitTable maps each dimension to its canonical unit and the input units it
 // accepts, each with a converter to canonical.
-var unitTable = map[Dimension]struct {
+var unitTable = map[models.Dimension]struct {
 	canonical string
 	toCanon   map[string]func(float64) float64
 }{
@@ -67,18 +66,18 @@ var unitTable = map[Dimension]struct {
 }
 
 // KnownDimension reports whether d is a Dimension constant.
-func KnownDimension(d Dimension) bool {
+func KnownDimension(d models.Dimension) bool {
 	_, ok := unitTable[d]
 	return ok
 }
 
 // CanonicalUnit returns d's canonical unit symbol ("" for count).
-func CanonicalUnit(d Dimension) string {
+func CanonicalUnit(d models.Dimension) string {
 	return unitTable[d].canonical
 }
 
 // AcceptsUnit reports whether unit is a valid input unit for d.
-func AcceptsUnit(d Dimension, unit string) bool {
+func AcceptsUnit(d models.Dimension, unit string) bool {
 	t, ok := unitTable[d]
 	if !ok {
 		return false
@@ -89,7 +88,7 @@ func AcceptsUnit(d Dimension, unit string) bool {
 
 // ToCanonical converts v in unit to d's canonical unit. An empty unit means
 // "already canonical".
-func ToCanonical(d Dimension, v float64, unit string) (float64, error) {
+func ToCanonical(d models.Dimension, v float64, unit string) (float64, error) {
 	t, ok := unitTable[d]
 	if !ok {
 		return 0, fmt.Errorf("unknown dimension %q", d)
@@ -107,7 +106,7 @@ func ToCanonical(d Dimension, v float64, unit string) (float64, error) {
 // FromCanonical converts a canonical value of d into unit (the inverse of
 // ToCanonical). Every conversion in the table is linear, so the inverse is
 // read off two points.
-func FromCanonical(d Dimension, v float64, unit string) (float64, error) {
+func FromCanonical(d models.Dimension, v float64, unit string) (float64, error) {
 	t, ok := unitTable[d]
 	if !ok {
 		return 0, fmt.Errorf("unknown dimension %q", d)

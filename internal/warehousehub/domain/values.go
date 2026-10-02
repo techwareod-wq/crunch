@@ -2,6 +2,7 @@ package domain
 
 import (
 	"encoding/json"
+	"github.com/atharva-ng/crunch/internal/models"
 	"math"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -88,26 +89,26 @@ func asMap(v any) (map[string]any, bool) {
 	return nil, false
 }
 
-func asRange(v any) (Range, bool) {
+func asRange(v any) (models.Range, bool) {
 	switch r := v.(type) {
-	case Range:
+	case models.Range:
 		return r, true
-	case *Range:
+	case *models.Range:
 		if r == nil {
-			return Range{}, false
+			return models.Range{}, false
 		}
 		return *r, true
 	}
 	m, ok := asMap(v)
 	if !ok {
-		return Range{}, false
+		return models.Range{}, false
 	}
 	lo, ok1 := asFloat(m["min"])
 	hi, ok2 := asFloat(m["max"])
 	if !ok1 || !ok2 {
-		return Range{}, false
+		return models.Range{}, false
 	}
-	return Range{Min: lo, Max: hi}, true
+	return models.Range{Min: lo, Max: hi}, true
 }
 
 // decodeDoc reads an object-shaped value into T. JSON-decoded maps (API
@@ -140,10 +141,10 @@ func decodeDoc[T any](v any) (T, bool) {
 }
 
 // asArea reads an area value; Sqm is the canonical number.
-func asArea(v any) (Area, bool) {
-	a, ok := decodeDoc[Area](v)
+func asArea(v any) (models.Area, bool) {
+	a, ok := decodeDoc[models.Area](v)
 	if !ok || math.IsNaN(a.Sqm) || math.IsInf(a.Sqm, 0) {
-		return Area{}, false
+		return models.Area{}, false
 	}
 	return a, true
 }
@@ -156,30 +157,3 @@ func DecodeValue[T any](v any) (T, bool) {
 
 // AsStrings reads a list-of-strings value in any of its shapes.
 func AsStrings(v any) ([]string, bool) { return asStrings(v) }
-
-// JSONValue converts BSON-decoded documents (primitive.D, which encodes to
-// JSON as a list of {Key, Value} pairs) into plain maps, recursively, so a
-// value read from Mongo serializes as the object it was stored from.
-func JSONValue(v any) any {
-	switch x := v.(type) {
-	case primitive.D:
-		m := make(map[string]any, len(x))
-		for _, e := range x {
-			m[e.Key] = JSONValue(e.Value)
-		}
-		return m
-	case bson.M:
-		m := make(map[string]any, len(x))
-		for k, e := range x {
-			m[k] = JSONValue(e)
-		}
-		return m
-	case primitive.A:
-		out := make([]any, len(x))
-		for i, e := range x {
-			out[i] = JSONValue(e)
-		}
-		return out
-	}
-	return v
-}

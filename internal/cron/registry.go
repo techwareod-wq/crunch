@@ -8,13 +8,22 @@ import (
 	"github.com/atharva-ng/crunch/internal/util/log"
 )
 
-// BuildJobRegistry assembles every registered job (defs, contributed by the
-// feature modules) from its code definition + values overrides. Schedule DEFINITIONS live in code; their times and on/off
+// ServiceLocator carries what job resolvers need.
+type ServiceLocator struct {
+	// DefaultZone is the IANA fallback zone (values cron.defaultZone).
+	DefaultZone string
+}
+
+// BuildJobRegistry assembles every registered job from its code definition +
+// values overrides. Schedule DEFINITIONS live in code; their times and on/off
 // flags live in values (cron.jobs.<name>), so a misbehaving beat dies with a
 // values change and a restart — no code, no migration.
 //
 // A job with no values entry, or enabled: false, is dark — logged and skipped.
-func BuildJobRegistry(defs []Job, v config.CronValues) ([]Job, error) {
+func BuildJobRegistry(l *ServiceLocator, v config.CronValues) ([]Job, error) {
+	defs := []Job{}
+	defs = append(defs, warehouseHubJobs(l)...)
+
 	jobs := make([]Job, 0, len(defs))
 	for _, def := range defs {
 		jv, ok := v.Jobs[string(def.Name)]

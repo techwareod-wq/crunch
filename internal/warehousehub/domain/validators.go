@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"github.com/atharva-ng/crunch/internal/models"
 	"math"
 	"regexp"
 	"slices"
@@ -22,13 +23,13 @@ const MaxValidations = 10
 // Validator is one registry entry.
 type Validator struct {
 	// AppliesTo lists the field types the kind may be set on.
-	AppliesTo []FieldType
+	AppliesTo []models.FieldType
 	// CheckParams validates the parameter when the admin saves the field and
 	// returns it in canonical form.
-	CheckParams func(f *Field, p any) (any, error)
+	CheckParams func(f *models.AttributeField, p any) (any, error)
 	// Check validates a canonical value (see CanonicalizeValue). It returns
 	// the default message on failure.
-	Check func(f *Field, fv *FieldValue, p any) error
+	Check func(f *models.AttributeField, fv *models.FieldValue, p any) error
 }
 
 // Validation kinds (v1).
@@ -43,9 +44,9 @@ const (
 
 var validators = map[string]Validator{
 	ValidMin: {
-		AppliesTo:   []FieldType{TypeNumber, TypeRange, TypeArea, TypeMoney},
+		AppliesTo:   []models.FieldType{TypeNumber, TypeRange, TypeArea, TypeMoney},
 		CheckParams: numberParam,
-		Check: func(f *Field, fv *FieldValue, p any) error {
+		Check: func(f *models.AttributeField, fv *models.FieldValue, p any) error {
 			lim, _ := asFloat(p)
 			if lo, _, ok := boundsOf(f.Type, fv.V); ok && lo < lim {
 				return fmt.Errorf("must be at least %v", lim)
@@ -54,9 +55,9 @@ var validators = map[string]Validator{
 		},
 	},
 	ValidMax: {
-		AppliesTo:   []FieldType{TypeNumber, TypeRange, TypeArea, TypeMoney},
+		AppliesTo:   []models.FieldType{TypeNumber, TypeRange, TypeArea, TypeMoney},
 		CheckParams: numberParam,
-		Check: func(f *Field, fv *FieldValue, p any) error {
+		Check: func(f *models.AttributeField, fv *models.FieldValue, p any) error {
 			lim, _ := asFloat(p)
 			if _, hi, ok := boundsOf(f.Type, fv.V); ok && hi > lim {
 				return fmt.Errorf("must be at most %v", lim)
@@ -65,15 +66,15 @@ var validators = map[string]Validator{
 		},
 	},
 	ValidMaxLength: {
-		AppliesTo: []FieldType{TypeText, TypeLongtext},
-		CheckParams: func(f *Field, p any) (any, error) {
+		AppliesTo: []models.FieldType{TypeText, TypeLongtext},
+		CheckParams: func(f *models.AttributeField, p any) (any, error) {
 			n, ok := asFloat(p)
 			if !ok || n != math.Trunc(n) || n < 1 || n > float64(maxTextLen(f.Type)) {
 				return nil, fmt.Errorf("expects a whole number 1–%d", maxTextLen(f.Type))
 			}
 			return int(n), nil
 		},
-		Check: func(_ *Field, fv *FieldValue, p any) error {
+		Check: func(_ *models.AttributeField, fv *models.FieldValue, p any) error {
 			n, _ := asFloat(p)
 			if s, _ := asString(fv.V); float64(len([]rune(s))) > n {
 				return fmt.Errorf("must be at most %d characters", int(n))
@@ -82,8 +83,8 @@ var validators = map[string]Validator{
 		},
 	},
 	ValidRegex: {
-		AppliesTo: []FieldType{TypeText},
-		CheckParams: func(_ *Field, p any) (any, error) {
+		AppliesTo: []models.FieldType{TypeText},
+		CheckParams: func(_ *models.AttributeField, p any) (any, error) {
 			s, ok := asString(p)
 			if !ok || s == "" || len(s) > MaxRegexLen {
 				return nil, fmt.Errorf("expects a pattern of 1–%d characters", MaxRegexLen)
@@ -93,7 +94,7 @@ var validators = map[string]Validator{
 			}
 			return s, nil
 		},
-		Check: func(_ *Field, fv *FieldValue, p any) error {
+		Check: func(_ *models.AttributeField, fv *models.FieldValue, p any) error {
 			pat, _ := asString(p)
 			re, err := compileRegex(pat)
 			if err != nil {
@@ -106,8 +107,8 @@ var validators = map[string]Validator{
 		},
 	},
 	ValidUnits: {
-		AppliesTo: []FieldType{TypeNumber, TypeRange, TypeArea},
-		CheckParams: func(f *Field, p any) (any, error) {
+		AppliesTo: []models.FieldType{TypeNumber, TypeRange, TypeArea},
+		CheckParams: func(f *models.AttributeField, p any) (any, error) {
 			us, ok := asStrings(p)
 			if !ok || len(us) == 0 {
 				return nil, fmt.Errorf("expects a non-empty list of units")
@@ -123,7 +124,7 @@ var validators = map[string]Validator{
 			}
 			return dedupe(us), nil
 		},
-		Check: func(f *Field, fv *FieldValue, p any) error {
+		Check: func(f *models.AttributeField, fv *models.FieldValue, p any) error {
 			us, _ := asStrings(p)
 			unit := ""
 			if f.Type == TypeArea {
@@ -143,8 +144,8 @@ var validators = map[string]Validator{
 		},
 	},
 	ValidCurrencies: {
-		AppliesTo: []FieldType{TypeMoney},
-		CheckParams: func(_ *Field, p any) (any, error) {
+		AppliesTo: []models.FieldType{TypeMoney},
+		CheckParams: func(_ *models.AttributeField, p any) (any, error) {
 			cs, ok := asStrings(p)
 			if !ok || len(cs) == 0 {
 				return nil, fmt.Errorf("expects a non-empty list of ISO 4217 codes")
@@ -159,9 +160,9 @@ var validators = map[string]Validator{
 			}
 			return dedupe(out), nil
 		},
-		Check: func(_ *Field, fv *FieldValue, p any) error {
+		Check: func(_ *models.AttributeField, fv *models.FieldValue, p any) error {
 			cs, _ := asStrings(p)
-			if m, ok := decodeDoc[Money](fv.V); ok && !slices.Contains(cs, m.Currency) {
+			if m, ok := decodeDoc[models.Money](fv.V); ok && !slices.Contains(cs, m.Currency) {
 				return fmt.Errorf("currency must be one of %s", strings.Join(cs, ", "))
 			}
 			return nil
@@ -170,8 +171,8 @@ var validators = map[string]Validator{
 }
 
 // ValidationKinds lists the registered kinds (sorted), for the admin form.
-func ValidationKinds() map[string][]FieldType {
-	out := make(map[string][]FieldType, len(validators))
+func ValidationKinds() map[string][]models.FieldType {
+	out := make(map[string][]models.FieldType, len(validators))
 	for k, v := range validators {
 		out[k] = slices.Clone(v.AppliesTo)
 	}
@@ -180,11 +181,11 @@ func ValidationKinds() map[string][]FieldType {
 
 // NormalizeValidations checks a field's validation list at save time and
 // returns it with canonical parameters.
-func NormalizeValidations(f *Field) ([]Validation, error) {
+func NormalizeValidations(f *models.AttributeField) ([]models.FieldValidation, error) {
 	if len(f.Validations) > MaxValidations {
 		return nil, fmt.Errorf("at most %d validations", MaxValidations)
 	}
-	out := make([]Validation, 0, len(f.Validations))
+	out := make([]models.FieldValidation, 0, len(f.Validations))
 	for _, v := range f.Validations {
 		reg, ok := validators[v.Kind]
 		if !ok {
@@ -206,7 +207,7 @@ func NormalizeValidations(f *Field) ([]Validation, error) {
 
 // RunValidations checks a canonical value against f's validations, in order,
 // and returns the first failure.
-func RunValidations(f *Field, fv *FieldValue) error {
+func RunValidations(f *models.AttributeField, fv *models.FieldValue) error {
 	if fv == nil {
 		return nil
 	}
@@ -225,7 +226,7 @@ func RunValidations(f *Field, fv *FieldValue) error {
 	return nil
 }
 
-func numberParam(_ *Field, p any) (any, error) {
+func numberParam(_ *models.AttributeField, p any) (any, error) {
 	f, ok := asFloat(p)
 	if !ok {
 		return nil, fmt.Errorf("expects a number")
@@ -236,7 +237,7 @@ func numberParam(_ *Field, p any) (any, error) {
 // boundsOf returns the low/high comparable numbers of a value: canonical for
 // number/range, sq m for area, minor units for money (skipped when the price
 // is on request).
-func boundsOf(t FieldType, v any) (lo, hi float64, ok bool) {
+func boundsOf(t models.FieldType, v any) (lo, hi float64, ok bool) {
 	switch t {
 	case TypeNumber:
 		f, ok := asFloat(v)
@@ -248,7 +249,7 @@ func boundsOf(t FieldType, v any) (lo, hi float64, ok bool) {
 		a, ok := asArea(v)
 		return a.Sqm, a.Sqm, ok
 	case TypeMoney:
-		m, ok := decodeDoc[Money](v)
+		m, ok := decodeDoc[models.Money](v)
 		if !ok || m.OnRequest {
 			return 0, 0, false
 		}
@@ -258,7 +259,7 @@ func boundsOf(t FieldType, v any) (lo, hi float64, ok bool) {
 }
 
 // fieldFamily is the unit family of a number/range/area field ("" if none).
-func fieldFamily(f *Field) Dimension {
+func fieldFamily(f *models.AttributeField) models.Dimension {
 	if f.Type == TypeArea {
 		return DimArea
 	}

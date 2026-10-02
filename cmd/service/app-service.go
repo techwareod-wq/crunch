@@ -6,23 +6,24 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/atharva-ng/crunch/cmd/service/controllers/admin"
+	"github.com/atharva-ng/crunch/cmd/service/controllers/attributes"
+	"github.com/atharva-ng/crunch/cmd/service/controllers/catalog"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/healthcheck"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/users"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/webhooks"
 	"github.com/atharva-ng/crunch/cmd/service/providers"
 	"github.com/atharva-ng/crunch/internal/config"
 	"github.com/atharva-ng/crunch/internal/middleware"
-	"github.com/atharva-ng/crunch/internal/modules"
 	"github.com/atharva-ng/crunch/internal/util/log"
 )
 
 func main() {
 	appCtx := &config.AppContext{}
-	mods := enabledModules(appCtx)
 
-	err := ProvideAppContext(appCtx, mods)
+	err := ProvideAppContext(appCtx)
 	if err != nil {
 		log.Error("failed to add app context", "error", err)
 		os.Exit(1)
@@ -35,19 +36,19 @@ func main() {
 	// sent directly to the server's IP are rejected. Empty list = unrestricted.
 	middleware.SetAllowedHosts(appCtx.Config.Server.AllowedHosts)
 
-	loadAppAPIs(appCtx, mods)
+	loadAppAPIs(appCtx)
 
 	middleware.RegisterAll(nil)
 
 	// Build async handlers after all services are wired.
-	primaryHandler := providers.BuildAsyncHandler(appCtx, mods)
-	secondaryHandler := providers.BuildSecondaryAsyncHandler(appCtx, mods)
+	primaryHandler := providers.BuildAsyncHandler(appCtx)
+	secondaryHandler := providers.BuildSecondaryAsyncHandler(appCtx)
 
 	// Cron scheduler: resolves who is due per registered job and enqueues onto
 	// the same queues the handlers above consume. Built after the services
 	// (resolvers use them); a misconfigured job set is fatal at boot, not
 	// silently at the first scheduled tick.
-	cronScheduler, err := providers.BuildCronScheduler(appCtx, mods)
+	cronScheduler, err := providers.BuildCronScheduler(appCtx)
 	if err != nil {
 		log.Error("failed to build cron scheduler", "error", err)
 		os.Exit(1)
@@ -61,12 +62,19 @@ func main() {
 	appCtx.TokenTracker.Start()
 	defer appCtx.TokenTracker.Stop()
 
-	// Module boot state (e.g. the attributes rules snapshot) must be loaded
-	// before the async handlers start consuming.
-	if err := modules.Start(ctx, mods); err != nil {
-		log.Error("failed to start modules", "error", err)
+	// The Warehouse root + rules snapshot must be loaded before the async
+	// handlers start consuming (recompute evaluates with it).
+	if err := appCtx.InternalServices.AttributeService.Boot(ctx); err != nil {
+		log.Error("failed to boot attribute service", "error", err)
 		os.Exit(1)
 	}
+	// Periodic rules refresh: bounds staleness on instances that didn't
+	// serve a tree/industry write.
+	refresh := time.Duration(appCtx.Config.Values.WarehouseHub.Attributes.CacheRefreshSeconds) * time.Second
+	if refresh <= 0 {
+		refresh = time.Minute
+	}
+	appCtx.InternalServices.AttributeService.StartRefresh(ctx, refresh)
 
 	// Start primary async handler in background.
 	go func() {
@@ -103,10 +111,11 @@ func main() {
 	}
 }
 
-func loadAppAPIs(appCtx *config.AppContext, mods []modules.Module) {
+func loadAppAPIs(appCtx *config.AppContext) {
 	healthcheck.Handle()
 	users.Handle(appCtx)
 	webhooks.Handle(appCtx)
 	admin.Handle(appCtx)
-	modules.RegisterRoutes(appCtx, mods)
+	attributes.Handle(appCtx)
+	catalog.Handle(appCtx)
 }

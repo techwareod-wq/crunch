@@ -89,7 +89,7 @@ cron:
   claimStaleSeconds: 600
   # IANA fallback zone for schedule validation and users with no stored zone.
   defaultZone: "Asia/Kolkata"
-  # Per-job switches, keyed by job name. Feature modules add theirs here.
+  # Per-job switches, keyed by job name (jobs defined in internal/cron/jobs_*.go).
   jobs:
     # Nightly re-evaluation of any warehouse whose projection lags the
     # current rulesVersion (D-040 safety net). Off until needed.
@@ -100,7 +100,7 @@ cron:
     catalog_media_gc:
       enabled: false
 
-# WarehouseHub feature tunables. Each feature module adds its own sub-block
+# WarehouseHub feature tunables. Each service adds its own sub-block
 # (attributes, catalog, search, aisearch, enquiries, analytics) as it lands.
 warehousehub:
   # Base URLs used to build links in emails, JSON-LD and the sitemap.

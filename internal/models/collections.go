@@ -5,8 +5,13 @@ package models
 const (
 	usersCollection = "users"
 
-	// WarehouseHub platform collections (feature modules keep their own
-	// collection names local to the module).
-	changeLogCollection    = "change_log"
-	metaCountersCollection = "meta_counters"
+	// WarehouseHub collections.
+	changeLogCollection          = "change_log"
+	metaCountersCollection       = "meta_counters"
+	attributeNodesCollection     = "attribute_nodes"
+	industriesCollection         = "industries"
+	warehousesCollection         = "warehouses"
+	warehouseRevisionsCollection = "warehouse_revisions"
+	warehouseMediaCollection     = "warehouse_media"
+	warehouseRentsCollection     = "warehouse_rents"
 )

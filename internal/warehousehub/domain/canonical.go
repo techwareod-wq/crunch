@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"github.com/atharva-ng/crunch/internal/models"
 	"math"
 	"strings"
 	"time"
@@ -14,7 +15,7 @@ const (
 	MaxLongtextLen = 10000
 )
 
-func maxTextLen(t FieldType) int {
+func maxTextLen(t models.FieldType) int {
 	if t == TypeLongtext {
 		return MaxLongtextLen
 	}
@@ -33,7 +34,7 @@ func maxTextLen(t FieldType) int {
 // A nil fv is null: allowed on optional fields only (D-124/D-125). Ratio
 // fields are computed and take no value (D-134). The field's validations run
 // last.
-func CanonicalizeValue(f *Field, fv *FieldValue) (*FieldValue, error) {
+func CanonicalizeValue(f *models.AttributeField, fv *models.FieldValue) (*models.FieldValue, error) {
 	if f.Type == TypeRatio {
 		return nil, fmt.Errorf("is calculated and takes no value")
 	}
@@ -70,7 +71,7 @@ func CanonicalizeValue(f *Field, fv *FieldValue) (*FieldValue, error) {
 		if err != nil {
 			return nil, err
 		}
-		out.V, out.Raw = c, &RawValue{Value: n, Unit: unitOrCanon(f, unit)}
+		out.V, out.Raw = c, &models.RawValue{Value: n, Unit: unitOrCanon(f, unit)}
 	case TypeRange:
 		in, unit := fv.V, ""
 		if fv.Raw != nil {
@@ -85,7 +86,7 @@ func CanonicalizeValue(f *Field, fv *FieldValue) (*FieldValue, error) {
 			return nil, err
 		}
 		hi, _ := toCanon(f, r.Max, unit)
-		out.V, out.Raw = Range{Min: lo, Max: hi}, &RawValue{Value: r, Unit: unitOrCanon(f, unit)}
+		out.V, out.Raw = models.Range{Min: lo, Max: hi}, &models.RawValue{Value: r, Unit: unitOrCanon(f, unit)}
 	case TypePick:
 		s, ok := asString(fv.V)
 		if !ok || !f.HasOption(s) {
@@ -117,7 +118,7 @@ func CanonicalizeValue(f *Field, fv *FieldValue) (*FieldValue, error) {
 		}
 		out.V = s
 	case TypeMoney:
-		m, ok := decodeDoc[Money](fv.V)
+		m, ok := decodeDoc[models.Money](fv.V)
 		m.Currency = strings.ToUpper(strings.TrimSpace(m.Currency))
 		if !ok || m.Amount < 0 || !isAlpha(m.Currency, 3) {
 			return nil, fmt.Errorf("expects {amount (minor units, ≥ 0), currency (ISO 4217)}")
@@ -136,7 +137,7 @@ func CanonicalizeValue(f *Field, fv *FieldValue) (*FieldValue, error) {
 		}
 		out.V = s
 	case TypeAddress:
-		a, ok := decodeDoc[Address](fv.V)
+		a, ok := decodeDoc[models.Address](fv.V)
 		if !ok {
 			return nil, fmt.Errorf("expects an address object")
 		}
@@ -146,7 +147,7 @@ func CanonicalizeValue(f *Field, fv *FieldValue) (*FieldValue, error) {
 		}
 		out.V = a
 	case TypeLocation:
-		l, ok := decodeDoc[Location](fv.V)
+		l, ok := decodeDoc[models.Location](fv.V)
 		if !ok || l.Lat < -90 || l.Lat > 90 || l.Lng < -180 || l.Lng > 180 ||
 			math.IsNaN(l.Lat) || math.IsNaN(l.Lng) {
 			return nil, fmt.Errorf("expects {lat, lng} within range")
@@ -159,7 +160,7 @@ func CanonicalizeValue(f *Field, fv *FieldValue) (*FieldValue, error) {
 		}
 		out.V = l
 	case TypeArea:
-		a, ok := decodeDoc[Area](fv.V)
+		a, ok := decodeDoc[models.Area](fv.V)
 		if !ok || a.Value < 0 || math.IsNaN(a.Value) || math.IsInf(a.Value, 0) {
 			return nil, fmt.Errorf("expects {value ≥ 0, unit}")
 		}
@@ -181,7 +182,7 @@ func CanonicalizeValue(f *Field, fv *FieldValue) (*FieldValue, error) {
 	return &out, nil
 }
 
-func toCanon(f *Field, v float64, unit string) (float64, error) {
+func toCanon(f *models.AttributeField, v float64, unit string) (float64, error) {
 	if f.Unit == nil {
 		if unit != "" {
 			return 0, fmt.Errorf("takes no unit")
@@ -191,14 +192,14 @@ func toCanon(f *Field, v float64, unit string) (float64, error) {
 	return ToCanonical(f.Unit.Family, v, unit)
 }
 
-func unitOrCanon(f *Field, unit string) string {
+func unitOrCanon(f *models.AttributeField, unit string) string {
 	if unit != "" || f.Unit == nil {
 		return unit
 	}
 	return CanonicalUnit(f.Unit.Family)
 }
 
-func trimAddress(a Address) Address {
+func trimAddress(a models.Address) models.Address {
 	for _, p := range []*string{&a.Line1, &a.Line2, &a.Locality, &a.City, &a.Region, &a.PostalCode} {
 		*p = strings.TrimSpace(*p)
 	}
@@ -216,8 +217,8 @@ func trimAddress(a Address) Address {
 //     gate (SubmitProblems) enforces them.
 //
 // Errors name the path, e.g. "cold_storage.temperature: expects a number".
-func CanonicalizeAttributes(s *Snapshot, in Attributes) (Attributes, error) {
-	out := Attributes{}
+func CanonicalizeAttributes(s *Snapshot, in models.Attributes) (models.Attributes, error) {
+	out := models.Attributes{}
 	for nk, st := range in {
 		n, ok := s.Node(nk)
 		if !ok {
@@ -230,13 +231,13 @@ func CanonicalizeAttributes(s *Snapshot, in Attributes) (Attributes, error) {
 		case StatusNo:
 			continue
 		case StatusUnknown:
-			out[nk] = NodeState{Status: StatusUnknown}
+			out[nk] = models.NodeState{Status: StatusUnknown}
 			continue
 		case StatusYes:
 		default:
 			return nil, fmt.Errorf("%s: status must be yes, no or unknown", nk)
 		}
-		fields := map[string]*FieldValue{}
+		fields := map[string]*models.FieldValue{}
 		for fk, fv := range st.Fields {
 			f, ok := n.Field(fk)
 			if !ok {
@@ -256,10 +257,10 @@ func CanonicalizeAttributes(s *Snapshot, in Attributes) (Attributes, error) {
 			}
 			fields[fk] = v
 		}
-		out[nk] = NodeState{Status: StatusYes, Fields: fields}
+		out[nk] = models.NodeState{Status: StatusYes, Fields: fields}
 	}
 	if _, ok := out[RootKey]; !ok && len(s.Nodes) > 0 {
-		out[RootKey] = NodeState{Status: StatusYes, Fields: map[string]*FieldValue{}}
+		out[RootKey] = models.NodeState{Status: StatusYes, Fields: map[string]*models.FieldValue{}}
 	}
 	return out, nil
 }
@@ -267,7 +268,7 @@ func CanonicalizeAttributes(s *Snapshot, in Attributes) (Attributes, error) {
 // SubmitProblems is the submit gate's attribute check (D-123/D-124): a yes
 // node whose parent isn't yes, and every required field without a value on a
 // node that is effectively yes. Empty = OK to submit.
-func SubmitProblems(s *Snapshot, a Attributes) []string {
+func SubmitProblems(s *Snapshot, a models.Attributes) []string {
 	var out []string
 	eff := effectiveStates(s, a)
 	for i := range s.Nodes {
@@ -294,8 +295,8 @@ func SubmitProblems(s *Snapshot, a Attributes) []string {
 // Evaluator step 1): the stored state, forced to no when any ancestor isn't
 // yes; the root is always yes; absent is no (D-133). Nodes unreachable from
 // the root are no.
-func effectiveStates(s *Snapshot, a Attributes) map[string]NodeStatus {
-	eff := make(map[string]NodeStatus, len(s.Nodes))
+func effectiveStates(s *Snapshot, a models.Attributes) map[string]models.NodeStatus {
+	eff := make(map[string]models.NodeStatus, len(s.Nodes))
 	for i := range s.Nodes { // tree order: parents before children
 		n := &s.Nodes[i]
 		switch {

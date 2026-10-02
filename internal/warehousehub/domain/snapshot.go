@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"github.com/atharva-ng/crunch/internal/models"
 	"sort"
 	"strings"
 )
@@ -15,23 +16,23 @@ type Snapshot struct {
 	// Nodes is every node in tree order: depth-first from the root, siblings
 	// by (order, key); each node's fields sorted by (order, key). Nodes not
 	// reachable from the root (a damaged tree) come last.
-	Nodes []Node
+	Nodes []models.AttributeNode
 	// Industries is every industry by (order, key).
-	Industries []Industry
+	Industries []models.Industry
 
-	byKey    map[string]*Node
+	byKey    map[string]*models.AttributeNode
 	children map[string][]string // parentKey → child keys in order
 }
 
 // NewSnapshot builds a snapshot from raw docs.
-func NewSnapshot(version int64, nodes []Node, industries []Industry) *Snapshot {
+func NewSnapshot(version int64, nodes []models.AttributeNode, industries []models.Industry) *Snapshot {
 	s := &Snapshot{
 		Version:  version,
-		byKey:    make(map[string]*Node, len(nodes)),
+		byKey:    make(map[string]*models.AttributeNode, len(nodes)),
 		children: map[string][]string{},
 	}
-	raw := make(map[string]Node, len(nodes))
-	sorted := make([]Node, 0, len(nodes))
+	raw := make(map[string]models.AttributeNode, len(nodes))
+	sorted := make([]models.AttributeNode, 0, len(nodes))
 	for _, n := range nodes {
 		n = n.Clone()
 		sort.SliceStable(n.Fields, func(i, j int) bool {
@@ -79,7 +80,7 @@ func NewSnapshot(version int64, nodes []Node, industries []Industry) *Snapshot {
 		s.byKey[s.Nodes[i].Key] = &s.Nodes[i]
 	}
 
-	s.Industries = make([]Industry, len(industries))
+	s.Industries = make([]models.Industry, len(industries))
 	for i, ind := range industries {
 		s.Industries[i] = ind.Clone()
 	}
@@ -96,13 +97,13 @@ func NewSnapshot(version int64, nodes []Node, industries []Industry) *Snapshot {
 func EmptySnapshot() *Snapshot { return NewSnapshot(0, nil, nil) }
 
 // Node looks up a node by key.
-func (s *Snapshot) Node(key string) (*Node, bool) {
+func (s *Snapshot) Node(key string) (*models.AttributeNode, bool) {
 	n, ok := s.byKey[key]
 	return n, ok
 }
 
 // Field resolves a full field path "<node>.<field>".
-func (s *Snapshot) Field(path string) (*Node, *Field, bool) {
+func (s *Snapshot) Field(path string) (*models.AttributeNode, *models.AttributeField, bool) {
 	nk, fk, ok := strings.Cut(path, ".")
 	if !ok {
 		return nil, nil, false
@@ -155,7 +156,7 @@ func (s *Snapshot) IsAncestor(anc, key string) bool {
 }
 
 // Industry looks up an industry by key.
-func (s *Snapshot) Industry(key string) (*Industry, bool) {
+func (s *Snapshot) Industry(key string) (*models.Industry, bool) {
 	for i := range s.Industries {
 		if s.Industries[i].Key == key {
 			return &s.Industries[i], true
@@ -166,7 +167,7 @@ func (s *Snapshot) Industry(key string) (*Industry, bool) {
 
 // TreeNode is one node of the nested admin tree view.
 type TreeNode struct {
-	Node
+	models.AttributeNode
 	Children []TreeNode `json:"children"`
 }
 
@@ -174,7 +175,7 @@ type TreeNode struct {
 func (s *Snapshot) Tree() []TreeNode {
 	var build func(key string) TreeNode
 	build = func(key string) TreeNode {
-		t := TreeNode{Node: *s.byKey[key], Children: []TreeNode{}}
+		t := TreeNode{AttributeNode: *s.byKey[key], Children: []TreeNode{}}
 		for _, c := range s.children[key] {
 			t.Children = append(t.Children, build(c))
 		}
@@ -187,7 +188,7 @@ func (s *Snapshot) Tree() []TreeNode {
 }
 
 // Rules gives other modules the current attribute snapshot (implemented by
-// the attributes module's cache, wired in cmd/service/modules.go).
+// the attribute service's cache, wired in cmd/service/providers).
 type Rules interface {
 	// Snapshot returns the current snapshot; never nil.
 	Snapshot() *Snapshot

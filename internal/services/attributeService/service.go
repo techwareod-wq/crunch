@@ -1,0 +1,148 @@
+// Package attributeService is the WarehouseHub attribute engine (spec 02):
+// the admin-defined attribute tree (nodes + fields) and industry rules, the
+// Warehouse root bootstrap, the in-memory rules snapshot other services
+// evaluate with (domain.Rules), and the recompute jobs that keep every live
+// warehouse's search projection in step with the rules. The evaluator itself
+// is pure and lives in internal/warehousehub/domain.
+package attributeService
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/atharva-ng/crunch/internal/models"
+	"github.com/atharva-ng/crunch/internal/pipeline"
+	"github.com/atharva-ng/crunch/internal/warehousehub/domain"
+)
+
+var (
+	// ErrNotFound: no node / field / industry with that key.
+	ErrNotFound = errors.New("not found")
+	// ErrKeyExists: a node, field or industry with that key already exists.
+	ErrKeyExists = models.ErrDuplicateKey
+	// ErrVersionConflict: the doc changed since the caller read it (CAS).
+	ErrVersionConflict = models.ErrVersionConflict
+)
+
+// ValidationError is a 400: the write breaks a tree / rule invariant.
+type ValidationError struct{ Msg string }
+
+func (e *ValidationError) Error() string { return e.Msg }
+
+// Invalid wraps err as a ValidationError.
+func Invalid(err error) error { return &ValidationError{Msg: err.Error()} }
+
+// Invalidf formats a ValidationError.
+func Invalidf(format string, a ...any) error { return Invalid(fmt.Errorf(format, a...)) }
+
+// NewNodeDefault is what a new node means for warehouses whose parent node is
+// yes (D-126). There is no "yes for all".
+type NewNodeDefault string
+
+const (
+	// DefaultUnknown writes {status: unknown} markers onto every such live
+	// doc and open draft, with no review (D-128); they surface in Needs-info.
+	DefaultUnknown NewNodeDefault = "unknown"
+	// DefaultNo writes nothing: absent = no (D-133).
+	DefaultNo NewNodeDefault = "no"
+)
+
+// WriteResult is returned by every tree / industry write.
+type WriteResult struct {
+	// RulesVersion after the write (0 when the bump failed).
+	RulesVersion int64 `json:"rulesVersion"`
+	// Changed lists the node / industry keys written.
+	Changed []string `json:"changed"`
+}
+
+// NodePatch is a node update: nil fields are unchanged. Key and parent are
+// not editable here (parent → MoveNode); fields have their own endpoints.
+type NodePatch struct {
+	Key             string    `json:"key"`
+	ExpectedVersion int       `json:"expectedVersion"`
+	Name            *string   `json:"name,omitempty"`
+	Description     *string   `json:"description,omitempty"`
+	Public          *bool     `json:"public,omitempty"`
+	Filterable      *bool     `json:"filterable,omitempty"`
+	FilterRow       *string   `json:"filterRow,omitempty"`
+	FilterPos       *int      `json:"filterPos,omitempty"`
+	Synonyms        *[]string `json:"synonyms,omitempty"`
+}
+
+// IndustryPatch is an industry update: nil fields are unchanged.
+type IndustryPatch struct {
+	Key             string              `json:"key"`
+	ExpectedVersion int                 `json:"expectedVersion"`
+	Name            *string             `json:"name,omitempty"`
+	Order           *int                `json:"order,omitempty"`
+	Required        *[]models.Condition `json:"required,omitempty"`
+	Preferred       *[]models.Condition `json:"preferred,omitempty"`
+}
+
+// Recompute (spec 02, D-040): every rules write dispatches recompute_all,
+// which pages the stale live/archived warehouses and fans out
+// recompute_batch messages; each batch evaluates and BulkWrites projections.
+const (
+	ProcessRecomputeAll   pipeline.ProcessType = "attributes.recompute_all"
+	ProcessRecomputeBatch pipeline.ProcessType = "attributes.recompute_batch"
+
+	// RunRules marks the fan-out dispatched by a rules write; safety-net runs
+	// use "sn-YYYYMMDD" so their keys never collide with it.
+	RunRules = "rules"
+)
+
+// RecomputeAllPayload is the attributes.recompute_all body.
+type RecomputeAllPayload struct {
+	RulesVersion int64  `json:"rulesVersion"`
+	Run          string `json:"run"`
+}
+
+// RecomputeBatchPayload is the attributes.recompute_batch body.
+type RecomputeBatchPayload struct {
+	RulesVersion int64    `json:"rulesVersion"`
+	IDs          []string `json:"ids"`
+}
+
+// RecomputeAllKey is the stable message id of one recompute_all run. The key
+// always carries the rulesVersion (a bare id would swallow later dispatches).
+func RecomputeAllKey(rulesVersion int64, run string) string {
+	return fmt.Sprintf("recompute_all:%d:%s", rulesVersion, run)
+}
+
+// AttributeService is the attribute engine.
+type AttributeService interface {
+	// Boot ensures the Warehouse root exists (D-142, idempotent; never
+	// overwrites admin edits) and loads the rules snapshot. Called once in
+	// main before the async handlers start.
+	Boot(ctx context.Context) error
+	// StartRefresh reloads the snapshot every interval until ctx ends, so an
+	// instance that didn't serve a write catches up.
+	StartRefresh(ctx context.Context, interval time.Duration)
+	// Rules is the snapshot other services evaluate with.
+	Rules() domain.Rules
+
+	// Snapshot reads the tree + industries straight from the DB (admin reads
+	// never edit against a stale cache).
+	Snapshot(ctx context.Context) (*domain.Snapshot, error)
+
+	// Tree writes. Each validates against a fresh snapshot, CAS-writes, logs
+	// to change_log, bumps rulesVersion and dispatches the recompute.
+	CreateNode(ctx context.Context, actor domain.Actor, n models.AttributeNode, def NewNodeDefault) (models.AttributeNode, WriteResult, error)
+	UpdateNode(ctx context.Context, actor domain.Actor, p NodePatch) (models.AttributeNode, WriteResult, error)
+	MoveNode(ctx context.Context, actor domain.Actor, key string, expected int, newParent string, order int) (models.AttributeNode, WriteResult, error)
+	ReorderNodes(ctx context.Context, actor domain.Actor, parentKey string, keys []string) (WriteResult, error)
+	CreateField(ctx context.Context, actor domain.Actor, nodeKey string, expected int, f models.AttributeField) (models.AttributeNode, WriteResult, error)
+	UpdateField(ctx context.Context, actor domain.Actor, nodeKey string, expected int, f models.AttributeField) (models.AttributeNode, WriteResult, error)
+	ReorderFields(ctx context.Context, actor domain.Actor, nodeKey string, expected int, keys []string) (models.AttributeNode, WriteResult, error)
+
+	// Industry writes (delete is superuser-only at the route).
+	CreateIndustry(ctx context.Context, actor domain.Actor, ind models.Industry) (models.Industry, WriteResult, error)
+	UpdateIndustry(ctx context.Context, actor domain.Actor, p IndustryPatch) (models.Industry, WriteResult, error)
+	DeleteIndustry(ctx context.Context, actor domain.Actor, key string, expected int) (WriteResult, error)
+
+	// Async handlers.
+	RecomputeAll(ctx context.Context, p RecomputeAllPayload) error
+	RecomputeBatch(ctx context.Context, p RecomputeBatchPayload) error
+}

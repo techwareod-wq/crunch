@@ -21,7 +21,8 @@ type DeletionReport struct {
 // hard-deletes everything that feature stores for the user and returns how
 // many documents it removed. Cleaners MUST be zero-match-OK (a re-run after a
 // partial failure converges) — there are no Mongo transactions to lean on.
-// Feature modules contribute cleaners at boot (see internal/modules).
+// Services that store user data contribute a cleaner, wired in
+// providers.InjectDefaultServices.
 type DataCleaner interface {
 	Name() string
 	DeleteUserData(ctx context.Context, userID primitive.ObjectID) (int64, error)

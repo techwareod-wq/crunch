@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"github.com/atharva-ng/crunch/internal/models"
+	"time"
+)
 
 // Tri is three-valued logic for conditions.
 type Tri int8
@@ -11,43 +14,10 @@ const (
 	TriTrue    Tri = 1
 )
 
-// NumFact is one known number in the search projection.
-type NumFact struct {
-	K string  `bson:"k" json:"k"`
-	V float64 `bson:"v" json:"v"`
-}
-
-// Projection is the search projection written onto the live `warehouses`
-// doc (spec 02 Evaluator §6) and read by search (04). Only public +
-// filterable nodes/fields (on a public node) enter Chips/Unk/Nums. Slices are
-// never nil so the stored arrays are always present.
-type Projection struct {
-	// Chips: "<node>" for a yes node (never the root), "<node>.<field>" for
-	// a true bool, "<node>.<field>:<option>" for a pick value and for each
-	// multi value.
-	Chips []string `bson:"chips" json:"chips"`
-	// Unk is the "include unverified" set: unknown nodes, plus required
-	// fields missing on a yes node (D-127) and ratios that can't be computed.
-	// A field filter treats its value as unknown when either the field path
-	// or its node key is listed.
-	Unk []string `bson:"unk" json:"unk"`
-	// Nums: canonical numbers (area in sq m); ranges emit <path>_min and
-	// <path>_max.
-	Nums []NumFact `bson:"nums" json:"nums"`
-	// Fit: "<industry>:<F|P|U|N>" per industry.
-	Fit []string `bson:"fit" json:"fit"`
-	// NeedsInfo: unknown nodes, then missing required field paths (D-039,
-	// D-139). Never null optional fields.
-	NeedsInfo       []string  `bson:"needs_info"        json:"needsInfo"`
-	NeedsInfoCount  int       `bson:"needs_info_count"  json:"needsInfoCount"`
-	FitRulesVersion int64     `bson:"fit_rules_version" json:"fitRulesVersion"`
-	EvaluatedAt     time.Time `bson:"evaluated_at"      json:"evaluatedAt"`
-}
-
 // Result is the full evaluation of one warehouse.
 type Result struct {
 	// State is every node's effective state.
-	State map[string]NodeStatus `json:"state"`
+	State map[string]models.NodeStatus `json:"state"`
 	// Ratios holds the computable ratio values by field path.
 	Ratios map[string]float64 `json:"ratios"`
 	// UnknownNodes and MissingRequired, in tree order.
@@ -57,12 +27,12 @@ type Result struct {
 	NeedsInfo []string `json:"needsInfo"`
 	// Fit is the verdict per industry.
 	Fit        map[string]Verdict `json:"fit"`
-	Projection Projection         `json:"-"`
+	Projection models.Projection  `json:"-"`
 }
 
 // Evaluate runs the attribute engine over one warehouse (spec 02 Evaluator).
 // Pure: no IO, deterministic for (snapshot, attributes, now).
-func Evaluate(s *Snapshot, a Attributes, now time.Time) Result {
+func Evaluate(s *Snapshot, a models.Attributes, now time.Time) Result {
 	e := &evaluator{s: s, a: a, eff: effectiveStates(s, a), ratios: map[string]float64{}}
 	res := Result{
 		State:           e.eff,
@@ -88,8 +58,8 @@ func Evaluate(s *Snapshot, a Attributes, now time.Time) Result {
 		}
 	}
 
-	proj := Projection{
-		Chips: []string{}, Unk: []string{}, Nums: []NumFact{}, Fit: []string{},
+	proj := models.Projection{
+		Chips: []string{}, Unk: []string{}, Nums: []models.NumFact{}, Fit: []string{},
 		FitRulesVersion: s.Version, EvaluatedAt: now,
 	}
 
@@ -143,7 +113,7 @@ func Evaluate(s *Snapshot, a Attributes, now time.Time) Result {
 }
 
 // nodeSearchable: the node itself is a chip, or one of its fields is.
-func nodeSearchable(n *Node) bool {
+func nodeSearchable(n *models.AttributeNode) bool {
 	if !n.Public {
 		return false
 	}
@@ -159,7 +129,7 @@ func nodeSearchable(n *Node) bool {
 }
 
 // project appends a present value's chips / numeric facts.
-func project(f *Field, path string, v any, chips []string, nums []NumFact) ([]string, []NumFact) {
+func project(f *models.AttributeField, path string, v any, chips []string, nums []models.NumFact) ([]string, []models.NumFact) {
 	switch f.Type {
 	case TypeBool:
 		if b, ok := asBool(v); ok && b {
@@ -177,11 +147,11 @@ func project(f *Field, path string, v any, chips []string, nums []NumFact) ([]st
 		}
 	case TypeNumber, TypeArea, TypeRatio:
 		if x, ok := numberOf(f.Type, v); ok {
-			nums = append(nums, NumFact{K: path, V: x})
+			nums = append(nums, models.NumFact{K: path, V: x})
 		}
 	case TypeRange:
 		if r, ok := asRange(v); ok {
-			nums = append(nums, NumFact{K: path + "_min", V: r.Min}, NumFact{K: path + "_max", V: r.Max})
+			nums = append(nums, models.NumFact{K: path + "_min", V: r.Min}, models.NumFact{K: path + "_max", V: r.Max})
 		}
 	}
 	return chips, nums
@@ -189,14 +159,14 @@ func project(f *Field, path string, v any, chips []string, nums []NumFact) ([]st
 
 type evaluator struct {
 	s      *Snapshot
-	a      Attributes
-	eff    map[string]NodeStatus
+	a      models.Attributes
+	eff    map[string]models.NodeStatus
 	ratios map[string]float64
 }
 
 // value returns node.field's value: the computed ratio, or the stored value
 // (nil/absent = not present).
-func (e *evaluator) value(node string, f *Field) (any, bool) {
+func (e *evaluator) value(node string, f *models.AttributeField) (any, bool) {
 	if f.Type == TypeRatio {
 		v, ok := e.ratios[node+"."+f.Key]
 		return v, ok
@@ -210,7 +180,7 @@ func (e *evaluator) value(node string, f *Field) (any, bool) {
 
 // ratio computes top ÷ (bottom ÷ per). Unknown when either input's node isn't
 // yes, a value is missing, or the bottom is zero.
-func (e *evaluator) ratio(r *RatioSpec) (float64, bool) {
+func (e *evaluator) ratio(r *models.RatioSpec) (float64, bool) {
 	top, ok1 := e.input(r.Top, "")
 	bottom, ok2 := e.input(r.Bottom, r.BottomUnit)
 	if !ok1 || !ok2 || bottom <= 0 || r.Per <= 0 {
@@ -246,7 +216,7 @@ func (e *evaluator) input(path, unit string) (float64, bool) {
 //   - field cmp: node no → F; node unknown → U; required field missing
 //     (D-127) or ratio not computable → U; optional null → F (D-125);
 //     otherwise compare.
-func (e *evaluator) cond(c Condition) Tri {
+func (e *evaluator) cond(c models.Condition) Tri {
 	n, ok := e.s.Node(c.Node)
 	if !ok {
 		return TriFalse
@@ -280,7 +250,7 @@ func (e *evaluator) cond(c Condition) Tri {
 // verdict applies D-033: Not fit if a required rule fails; Unverified if a
 // required OR preferred rule is unknown; Fit if every preferred rule holds;
 // else Partial.
-func (e *evaluator) verdict(ind *Industry) Verdict {
+func (e *evaluator) verdict(ind *models.Industry) Verdict {
 	req := make([]Tri, 0, len(ind.Required))
 	for _, c := range ind.Required {
 		req = append(req, e.cond(c))
@@ -311,7 +281,7 @@ func (e *evaluator) verdict(ind *Industry) Verdict {
 // of fields on yes nodes that hold a value (each unknown node counts as one
 // missing item; ratios count when computable), verified is the share of
 // stored values carrying a verifiedAt (D-031).
-func Completeness(s *Snapshot, a Attributes, r Result) (completeness, verified float64) {
+func Completeness(s *Snapshot, a models.Attributes, r Result) (completeness, verified float64) {
 	var total, filled, stored, checked int
 	for i := range s.Nodes {
 		n := &s.Nodes[i]

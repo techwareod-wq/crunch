@@ -9,11 +9,10 @@ import (
 	"github.com/atharva-ng/crunch/cmd/service/providers"
 	"github.com/atharva-ng/crunch/internal/config"
 	"github.com/atharva-ng/crunch/internal/models"
-	"github.com/atharva-ng/crunch/internal/modules"
 	"github.com/atharva-ng/crunch/internal/util/log"
 )
 
-func ProvideAppContext(appCtx *config.AppContext, mods []modules.Module) error {
+func ProvideAppContext(appCtx *config.AppContext) error {
 	if err := config.LoadConfigFromEnv(&appCtx.Config); err != nil {
 		return err
 	}
@@ -36,20 +35,23 @@ func ProvideAppContext(appCtx *config.AppContext, mods []modules.Module) error {
 		models.EnsureCronClaimIndexes,
 		models.EnsureCronRunIndexes,
 		models.EnsureChangeLogIndexes,
+		models.EnsureAttributeNodeIndexes,
+		models.EnsureIndustryIndexes,
+		models.EnsureWarehouseIndexes,
+		models.EnsureWarehouseRevisionIndexes,
+		models.EnsureWarehouseMediaIndexes,
+		models.EnsureWarehouseRentIndexes,
 	} {
 		if err := ensure(context.Background()); err != nil {
 			return err
 		}
 	}
-	if err := modules.EnsureIndexes(context.Background(), mods); err != nil {
-		return err
-	}
 	log.Info("MongoDB connected")
 
-	if err := providers.InjectDefaultProviders(appCtx, mods); err != nil {
+	if err := providers.InjectDefaultProviders(appCtx); err != nil {
 		return err
 	}
-	if err := providers.InjectDefaultServices(appCtx, mods); err != nil {
+	if err := providers.InjectDefaultServices(appCtx); err != nil {
 		return err
 	}
 

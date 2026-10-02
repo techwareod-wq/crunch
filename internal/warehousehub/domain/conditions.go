@@ -2,45 +2,27 @@ package domain
 
 import (
 	"fmt"
+	"github.com/atharva-ng/crunch/internal/models"
 	"slices"
 )
 
-// Cmp is a condition comparator (D-141).
-type Cmp string
-
+// Comparators (D-141).
 const (
-	CmpIsYes       Cmp = "is_yes"       // node state (no field)
-	CmpEq          Cmp = "eq"           // bool, number, area, ratio, pick
-	CmpGte         Cmp = "gte"          // number, area, ratio; range: max ≥ value ("can reach")
-	CmpLte         Cmp = "lte"          // number, area, ratio; range: min ≤ value
-	CmpIn          Cmp = "in"           // pick: one of; multi: any overlap
-	CmpContains    Cmp = "contains"     // multi: holds the value
-	CmpContainsAll Cmp = "contains_all" // multi: holds every value
+	CmpIsYes       models.Cmp = "is_yes"       // node state (no field)
+	CmpEq          models.Cmp = "eq"           // bool, number, area, ratio, pick
+	CmpGte         models.Cmp = "gte"          // number, area, ratio; range: max ≥ value ("can reach")
+	CmpLte         models.Cmp = "lte"          // number, area, ratio; range: min ≤ value
+	CmpIn          models.Cmp = "in"           // pick: one of; multi: any overlap
+	CmpContains    models.Cmp = "contains"     // multi: holds the value
+	CmpContainsAll models.Cmp = "contains_all" // multi: holds every value
 )
-
-// Condition is one industry rule: `node is_yes` or `node.field <cmp> value`.
-// Numeric values are in the field's canonical unit (sq m for area).
-type Condition struct {
-	Node  string `bson:"node"            json:"node"`
-	Field string `bson:"field,omitempty" json:"field,omitempty"`
-	Cmp   Cmp    `bson:"cmp"             json:"cmp"`
-	Value any    `bson:"value,omitempty" json:"value,omitempty"`
-}
-
-// Path is the condition's target: "<node>" or "<node>.<field>".
-func (c Condition) Path() string {
-	if c.Field == "" {
-		return c.Node
-	}
-	return c.Node + "." + c.Field
-}
 
 // MaxConds bounds one rule list.
 const MaxConds = 20
 
 // NormalizeCondition validates c against the tree and returns it with Value
 // coerced to its canonical Go type (nil | bool | float64 | string | []string).
-func NormalizeCondition(s *Snapshot, c Condition) (Condition, error) {
+func NormalizeCondition(s *Snapshot, c models.Condition) (models.Condition, error) {
 	n, ok := s.Node(c.Node)
 	if !ok {
 		return c, fmt.Errorf("condition references unknown node %q", c.Node)
@@ -59,7 +41,7 @@ func NormalizeCondition(s *Snapshot, c Condition) (Condition, error) {
 	if !ok {
 		return c, fmt.Errorf("condition references unknown field %q", c.Path())
 	}
-	bad := func() (Condition, error) {
+	bad := func() (models.Condition, error) {
 		return c, fmt.Errorf("condition on %q: comparator %q with value %v is not valid for a %s field", c.Path(), c.Cmp, c.Value, f.Type)
 	}
 	switch f.Type {
@@ -121,7 +103,7 @@ func NormalizeCondition(s *Snapshot, c Condition) (Condition, error) {
 	return c, nil
 }
 
-func validOptions(f *Field, vs []string) bool {
+func validOptions(f *models.AttributeField, vs []string) bool {
 	if len(vs) == 0 {
 		return false
 	}
@@ -134,11 +116,11 @@ func validOptions(f *Field, vs []string) bool {
 }
 
 // NormalizeConditions validates a rule list (≤ MaxConds).
-func NormalizeConditions(s *Snapshot, conds []Condition) ([]Condition, error) {
+func NormalizeConditions(s *Snapshot, conds []models.Condition) ([]models.Condition, error) {
 	if len(conds) > MaxConds {
 		return nil, fmt.Errorf("at most %d conditions", MaxConds)
 	}
-	out := make([]Condition, 0, len(conds))
+	out := make([]models.Condition, 0, len(conds))
 	for _, c := range conds {
 		n, err := NormalizeCondition(s, c)
 		if err != nil {
@@ -149,10 +131,10 @@ func NormalizeConditions(s *Snapshot, conds []Condition) ([]Condition, error) {
 	return out, nil
 }
 
-// References reports whether any of ind's rules names node (field == "") or
-// node.field (option == "") or uses option in its value.
-func (ind *Industry) References(node, field, option string) bool {
-	for _, set := range [][]Condition{ind.Required, ind.Preferred} {
+// IndustryReferences reports whether any of ind's rules names node (field ==
+// "") or node.field (option == "") or uses option in its value.
+func IndustryReferences(ind *models.Industry, node, field, option string) bool {
+	for _, set := range [][]models.Condition{ind.Required, ind.Preferred} {
 		for _, c := range set {
 			if c.Node != node || (field != "" && c.Field != field) {
 				continue
@@ -174,7 +156,7 @@ func (ind *Industry) References(node, field, option string) bool {
 // compare evaluates a present canonical value against c. A value of the
 // wrong shape is "not met": it can only come from a corrupted doc, and
 // failing closed keeps a bad row out of fit results.
-func compare(t FieldType, v any, c Condition) bool {
+func compare(t models.FieldType, v any, c models.Condition) bool {
 	switch t {
 	case TypeBool:
 		a, ok1 := asBool(v)
@@ -257,7 +239,7 @@ func compare(t FieldType, v any, c Condition) bool {
 
 // numberOf reads the comparable number of a numeric field's value: canonical
 // number, area in sq m, ratio as computed.
-func numberOf(t FieldType, v any) (float64, bool) {
+func numberOf(t models.FieldType, v any) (float64, bool) {
 	if t == TypeArea {
 		a, ok := asArea(v)
 		return a.Sqm, ok

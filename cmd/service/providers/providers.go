@@ -6,7 +6,7 @@ import (
 
 	"github.com/atharva-ng/crunch/internal/config"
 	"github.com/atharva-ng/crunch/internal/cron"
-	"github.com/atharva-ng/crunch/internal/modules"
+	"github.com/atharva-ng/crunch/internal/pipeline"
 	apiclient "github.com/atharva-ng/crunch/internal/providers/impl/apiClient"
 	"github.com/atharva-ng/crunch/internal/providers/impl/clerkaccounts"
 	"github.com/atharva-ng/crunch/internal/providers/impl/geocode"
@@ -18,17 +18,21 @@ import (
 	accountsvc "github.com/atharva-ng/crunch/internal/services/accountService/service"
 	accountstore "github.com/atharva-ng/crunch/internal/services/accountService/store"
 	asynchandler "github.com/atharva-ng/crunch/internal/services/asyncHandler"
+	attributesvc "github.com/atharva-ng/crunch/internal/services/attributeService/service"
+	attributestore "github.com/atharva-ng/crunch/internal/services/attributeService/store"
+	catalogsvc "github.com/atharva-ng/crunch/internal/services/catalogService/service"
+	catalogstore "github.com/atharva-ng/crunch/internal/services/catalogService/store"
 	usersvc "github.com/atharva-ng/crunch/internal/services/userservice/service"
 	userstore "github.com/atharva-ng/crunch/internal/services/userservice/store"
 	"github.com/atharva-ng/crunch/internal/tokentracker"
 	"github.com/atharva-ng/crunch/internal/util/log"
+	"github.com/atharva-ng/crunch/internal/warehousehub/changelog"
 )
 
 // InjectDefaultProviders wires the infrastructure providers: S3, the token
 // tracker, both SQS queues, the idempotency store, the LLM + image-generation
-// clients, the shared HTTP client and the dispatcher. mods supply
-// the process types routed to the secondary (LLM-gated) queue.
-func InjectDefaultProviders(appCtx *config.AppContext, mods []modules.Module) error {
+// clients, the shared HTTP client and the dispatcher.
+func InjectDefaultProviders(appCtx *config.AppContext) error {
 	if err := InjectDefaultS3Provider(appCtx); err != nil {
 		return err
 	}
@@ -73,7 +77,7 @@ func InjectDefaultProviders(appCtx *config.AppContext, mods []modules.Module) er
 	appCtx.InternalServices.Dispatcher = asynchandler.NewDispatcher(
 		appCtx.QueueProvider,
 		appCtx.SecondaryQueueProvider,
-		modules.LLMProcessTypes(mods),
+		llmProcessTypes,
 		appCtx.Config.AsyncHandler.MaxRetries,
 	)
 
@@ -114,56 +118,89 @@ func buildImageGenerator(appCtx *config.AppContext) interfaces.ImageGenerator {
 	}
 }
 
-// InjectDefaultServices wires the platform services: users, the roles cache
-// and the account-deletion cascade (with every module's DataCleaners).
-func InjectDefaultServices(appCtx *config.AppContext, mods []modules.Module) error {
+// llmProcessTypes are the process types routed to the secondary (LLM-gated)
+// queue. None yet; AI search (05) adds its own.
+var llmProcessTypes []pipeline.ProcessType
+
+// InjectDefaultServices wires the services: users, the account-deletion
+// cascade and the WarehouseHub services (attributes, then catalog, which
+// evaluates with the attribute rules).
+func InjectDefaultServices(appCtx *config.AppContext) error {
 	appCtx.InternalServices.UserService = usersvc.NewService(userstore.NewStore())
 
 	appCtx.InternalServices.ClerkAccounts = clerkaccounts.GetProvider()
 	appCtx.InternalServices.AccountService = accountsvc.NewService(
 		accountstore.NewStore(),
 		appCtx.InternalServices.ClerkAccounts,
-		modules.DataCleaners(mods),
+		nil, // no feature stores user data yet (enquiries add a cleaner, D-019)
 	)
+
+	attributes := attributesvc.NewService(
+		attributestore.NewStore(),
+		appCtx.InternalServices.Dispatcher,
+		changelog.New(),
+		appCtx.Config.Values.WarehouseHub.Attributes,
+	)
+	appCtx.InternalServices.AttributeService = attributes
+
+	appCtx.InternalServices.CatalogService = catalogsvc.NewService(
+		catalogstore.NewStore(),
+		attributes.Rules(),
+		changelog.New(),
+		appCtx.Geocoder,
+		appCtx.InternalServices.Dispatcher,
+		appCtx.S3Provider,
+		appCtx.Config.AWS,
+		appCtx.Config.Values.Storage,
+		appCtx.Config.Values.WarehouseHub,
+	)
+	log.Info("Injected WarehouseHub services")
 
 	return nil
 }
 
+func buildServiceLocator(appCtx *config.AppContext) *asynchandler.ServiceLocator {
+	return &asynchandler.ServiceLocator{
+		AttributeService: appCtx.InternalServices.AttributeService,
+		CatalogService:   appCtx.InternalServices.CatalogService,
+	}
+}
+
 // BuildAsyncHandler creates the primary async handler.
 // Must be called after InjectDefaultServices.
-func BuildAsyncHandler(appCtx *config.AppContext, mods []modules.Module) *asynchandler.AsyncHandler {
+func BuildAsyncHandler(appCtx *config.AppContext) *asynchandler.AsyncHandler {
 	return asynchandler.NewAsyncHandler(
 		appCtx.QueueProvider,
 		appCtx.IdempotencyStore,
-		modules.BuildRegistry(mods),
+		asynchandler.BuildProcessRegistry(buildServiceLocator(appCtx)),
 		appCtx.Config.AsyncHandler.WorkerCount,
 		appCtx.Config.AsyncHandler.MaxRetries,
 		appCtx.Config.AsyncHandler.ShutdownTimeout,
-		modules.VisibilityOverrides(mods),
+		nil,
 	)
 }
 
 // BuildSecondaryAsyncHandler creates the async handler for the secondary
 // (LLM) queue with its own worker pool.
-func BuildSecondaryAsyncHandler(appCtx *config.AppContext, mods []modules.Module) *asynchandler.AsyncHandler {
+func BuildSecondaryAsyncHandler(appCtx *config.AppContext) *asynchandler.AsyncHandler {
 	return asynchandler.NewAsyncHandler(
 		appCtx.SecondaryQueueProvider,
 		appCtx.IdempotencyStore,
-		modules.BuildRegistry(mods),
+		asynchandler.BuildProcessRegistry(buildServiceLocator(appCtx)),
 		appCtx.Config.AsyncHandler.LLMWorkerCount,
 		appCtx.Config.AsyncHandler.MaxRetries,
 		appCtx.Config.AsyncHandler.ShutdownTimeout,
-		modules.VisibilityOverrides(mods),
+		nil,
 	)
 }
 
-// BuildCronScheduler assembles the cron layer: job registry (module
+// BuildCronScheduler assembles the cron layer: job registry (code
 // definitions + values times/flags) → scheduler (ticker + Mongo occurrence
 // claims). Must be called after InjectDefaultServices, and started in main
 // alongside the other background loops.
-func BuildCronScheduler(appCtx *config.AppContext, mods []modules.Module) (*cron.Scheduler, error) {
+func BuildCronScheduler(appCtx *config.AppContext) (*cron.Scheduler, error) {
 	values := appCtx.Config.Values.Cron
-	jobs, err := cron.BuildJobRegistry(modules.CronJobs(mods), values)
+	jobs, err := cron.BuildJobRegistry(&cron.ServiceLocator{DefaultZone: values.DefaultZone}, values)
 	if err != nil {
 		return nil, err
 	}

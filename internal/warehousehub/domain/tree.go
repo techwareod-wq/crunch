@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"github.com/atharva-ng/crunch/internal/models"
 	"reflect"
 	"regexp"
 	"slices"
@@ -30,7 +31,7 @@ func ValidKey(k string) bool { return keyRe.MatchString(k) }
 // ValidateNode checks a node (and every field) against the tree and returns
 // it normalized. The parent must exist and must not be the node or one of its
 // descendants (a move cycle). Only the root has no parent.
-func ValidateNode(s *Snapshot, n Node) (Node, error) {
+func ValidateNode(s *Snapshot, n models.AttributeNode) (models.AttributeNode, error) {
 	n = n.Clone()
 	if !ValidKey(n.Key) {
 		return n, fmt.Errorf("key %q must be lowercase letters, digits and _ (start with a letter, ≤ 48)", n.Key)
@@ -72,14 +73,14 @@ func ValidateNode(s *Snapshot, n Node) (Node, error) {
 		}
 	}
 	if n.Fields == nil {
-		n.Fields = []Field{}
+		n.Fields = []models.AttributeField{}
 	}
 	return n, nil
 }
 
 // ValidateField checks one field of owner (which may not be in s yet) and
 // returns it normalized.
-func ValidateField(s *Snapshot, owner *Node, f Field) (Field, error) {
+func ValidateField(s *Snapshot, owner *models.AttributeNode, f models.AttributeField) (models.AttributeField, error) {
 	f = f.Clone()
 	path := owner.Key + "." + f.Key
 	if !ValidKey(f.Key) {
@@ -89,7 +90,7 @@ func ValidateField(s *Snapshot, owner *Node, f Field) (Field, error) {
 	if f.Name, f.Description, err = checkText(f.Name, f.Description); err != nil {
 		return f, fmt.Errorf("%s: %w", path, err)
 	}
-	bad := func(format string, a ...any) (Field, error) {
+	bad := func(format string, a ...any) (models.AttributeField, error) {
 		return f, fmt.Errorf("%s: %s", path, fmt.Sprintf(format, a...))
 	}
 	if !KnownFieldType(f.Type) {
@@ -166,12 +167,12 @@ func ValidateField(s *Snapshot, owner *Node, f Field) (Field, error) {
 
 // checkRatioInput: path names a numeric, non-ratio field (owner's own fields
 // are resolved from owner, which may be unsaved); unit must be of its family.
-func checkRatioInput(s *Snapshot, owner *Node, path, unit string) error {
+func checkRatioInput(s *Snapshot, owner *models.AttributeNode, path, unit string) error {
 	nk, fk, ok := strings.Cut(path, ".")
 	if !ok {
 		return fmt.Errorf("%q must be <node>.<field>", path)
 	}
-	var f *Field
+	var f *models.AttributeField
 	if nk == owner.Key {
 		f, ok = owner.Field(fk)
 	} else {
@@ -196,7 +197,7 @@ func checkRatioInput(s *Snapshot, owner *Node, path, unit string) error {
 // (D-130), the locked flag, and any option (options are removed only through
 // the superuser delete, D-138). A locked field changes name, description and
 // order only (D-140).
-func CheckFieldUpdate(old, upd Field) error {
+func CheckFieldUpdate(old, upd models.AttributeField) error {
 	if old.Key != upd.Key {
 		return fmt.Errorf("a field key is immutable")
 	}
@@ -224,7 +225,7 @@ func CheckFieldUpdate(old, upd Field) error {
 
 // ValidateIndustry checks an industry against the tree and returns it with
 // normalized conditions.
-func ValidateIndustry(s *Snapshot, ind Industry) (Industry, error) {
+func ValidateIndustry(s *Snapshot, ind models.Industry) (models.Industry, error) {
 	ind = ind.Clone()
 	if !ValidKey(ind.Key) {
 		return ind, fmt.Errorf("key %q must be lowercase letters, digits and _ (start with a letter, ≤ 48)", ind.Key)

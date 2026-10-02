@@ -8,6 +8,8 @@ import (
 	"github.com/atharva-ng/crunch/internal/tokentracker"
 
 	"github.com/atharva-ng/crunch/internal/services/accountService"
+	"github.com/atharva-ng/crunch/internal/services/attributeService"
+	"github.com/atharva-ng/crunch/internal/services/catalogService"
 	"github.com/atharva-ng/crunch/internal/services/userservice"
 )
 
@@ -34,6 +36,9 @@ type InternalServices struct {
 	Dispatcher interfaces.Dispatcher
 	// ClerkAccounts is the outbound Clerk Backend API (account deletes).
 	ClerkAccounts interfaces.ClerkAccounts
+	// WarehouseHub services.
+	AttributeService attributeService.AttributeService
+	CatalogService   catalogService.CatalogService
 }
 
 type AppContext struct {
