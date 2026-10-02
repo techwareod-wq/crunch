@@ -17,12 +17,12 @@ import (
 // dependencies (domain interfaces) are wired here too.
 func enabledModules(appCtx *config.AppContext) []modules.Module {
 	// attrs.Rules() is the domain.Rules snapshot the catalog (03) and search
-	// (04) evaluate with; hand it to them as they land.
+	// (04) evaluate with.
 	attrs := attributes.New(appCtx)
 	return []modules.Module{
 		// WarehouseHub (D-004): one module per service.
 		attrs,
-		catalog.New(appCtx),
+		catalog.New(appCtx, attrs.Rules()),
 		search.New(appCtx),
 		aisearch.New(appCtx),
 		enquiries.New(appCtx),

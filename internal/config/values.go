@@ -42,6 +42,32 @@ type WarehouseHubValues struct {
 	AdminBaseURL string `yaml:"adminBaseURL"`
 	// Attributes tunes the attribute engine (spec 02).
 	Attributes AttributesValues `yaml:"attributes"`
+	// Catalog tunes listings, review and media (spec 03).
+	Catalog CatalogValues `yaml:"catalog"`
+}
+
+// CatalogValues is the `warehousehub.catalog` block.
+type CatalogValues struct {
+	// AllowSelfApprove lets an approver approve a revision they submitted
+	// (D-053, off by default).
+	AllowSelfApprove bool `yaml:"allowSelfApprove"`
+	// MaxPhotos caps a warehouse's photos (D-062).
+	MaxPhotos int `yaml:"maxPhotos"`
+	// MaxPhotoBytes / MaxDocBytes cap one upload (D-062).
+	MaxPhotoBytes int64 `yaml:"maxPhotoBytes"`
+	MaxDocBytes   int64 `yaml:"maxDocBytes"`
+	// MediaGcPendingHours: an upload never confirmed within this is deleted.
+	MediaGcPendingHours int `yaml:"mediaGcPendingHours"`
+	// MediaGcUnreferencedDays: media no revision references for this long
+	// is deleted.
+	MediaGcUnreferencedDays int `yaml:"mediaGcUnreferencedDays"`
+	// ListDefault / ListMax bound the admin list page sizes.
+	ListDefault int `yaml:"listDefault"`
+	ListMax     int `yaml:"listMax"`
+	// PublicPageSize is the page size of the public slugs / sitemap feeds.
+	PublicPageSize int `yaml:"publicPageSize"`
+	// BulkApproveMax caps one bulk-approve request.
+	BulkApproveMax int `yaml:"bulkApproveMax"`
 }
 
 // AttributesValues is the `warehousehub.attributes` block.
@@ -185,6 +211,15 @@ type AnthropicLLMValues struct {
 type APIValues struct {
 	ImageGen   ImageGenValues   `yaml:"imageGen"`
 	HTTPClient HTTPClientValues `yaml:"httpClient"`
+	Geocode    GeocodeValues    `yaml:"geocode"`
+}
+
+// GeocodeValues configures the Google geocoder (D-061, D-078).
+type GeocodeValues struct {
+	// APIURL is the Geocoding API endpoint.
+	APIURL string `yaml:"apiURL"`
+	// TimeoutMillis bounds one geocode call (800 ms, D-078).
+	TimeoutMillis int `yaml:"timeoutMillis"`
 }
 
 // HTTPClientValues tunes the shared ApiClient http.Client (see apiClient.GetClient).

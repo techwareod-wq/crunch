@@ -69,6 +69,13 @@ type AWSConfig struct {
 	PublicMediaBaseURL string
 }
 
+// MapsConfig holds the Google Maps Platform key (geocoding, D-061/D-078).
+// Empty disables geocoding: drafts save without a pin and editors set it by
+// hand.
+type MapsConfig struct {
+	GoogleAPIKey string
+}
+
 type LLMConfig struct {
 	AnthropicAPIKey string
 	OpenAIAPIKey    string
@@ -100,6 +107,7 @@ type AppConfig struct {
 	Clerk        ClerkConfig
 	AWS          AWSConfig
 	LLM          LLMConfig
+	Maps         MapsConfig
 	SQS          SQSConfig
 	AsyncHandler AsyncHandlerConfig
 	// Values holds the YAML-sourced runtime tunables + external API URLs. The
@@ -199,6 +207,10 @@ func (c *AppConfig) LoadLLMConfig() {
 	c.LLM.GeminiAPIKey = os.Getenv("GEMINI_API_KEY")
 }
 
+func (c *AppConfig) LoadMapsConfig() {
+	c.Maps.GoogleAPIKey = os.Getenv("GOOGLE_MAPS_API_KEY")
+}
+
 func (c *AppConfig) LoadSQSConfig() {
 	c.SQS.QueueURL = os.Getenv("SQS_QUEUE_URL")
 	c.SQS.SecondaryQueueURL = os.Getenv("SQS_SECONDARY_QUEUE_URL")
@@ -279,6 +291,7 @@ func LoadConfigFromEnv(c *AppConfig) error {
 	c.LoadClerkConfig()
 	c.LoadAWSConfig()
 	c.LoadLLMConfig()
+	c.LoadMapsConfig()
 	c.LoadSQSConfig()
 	c.LoadAsyncHandlerConfig()
 	return nil

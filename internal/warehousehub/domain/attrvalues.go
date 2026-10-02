@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Warehouse-side attribute data (spec 02 "Warehouse document shape"):
 //
@@ -67,6 +70,10 @@ func (a Attributes) Value(node, field string) *FieldValue {
 	return a[node].Fields[field]
 }
 
+// Value objects (Range, Money, Address, Location, Area) use the same keys in
+// BSON and JSON: they are stored inside FieldValue.V as plain documents and
+// must read back (see JSONValue) exactly as the API accepts them.
+
 // Range is a min–max value (e.g. a temperature range).
 type Range struct {
 	Min float64 `bson:"min" json:"min"`
@@ -80,7 +87,7 @@ type Money struct {
 	Currency  string `bson:"currency"             json:"currency"`
 	Basis     string `bson:"basis,omitempty"      json:"basis,omitempty"`
 	Period    string `bson:"period,omitempty"     json:"period,omitempty"`
-	OnRequest bool   `bson:"on_request,omitempty" json:"onRequest,omitempty"`
+	OnRequest bool   `bson:"onRequest,omitempty"  json:"onRequest,omitempty"`
 }
 
 // Address is a postal address. Country is ISO 3166-1 alpha-2.
@@ -90,7 +97,7 @@ type Address struct {
 	Locality   string `bson:"locality,omitempty"    json:"locality,omitempty"`
 	City       string `bson:"city"                  json:"city"`
 	Region     string `bson:"region,omitempty"      json:"region,omitempty"`
-	PostalCode string `bson:"postal_code,omitempty" json:"postalCode,omitempty"`
+	PostalCode string `bson:"postalCode,omitempty"  json:"postalCode,omitempty"`
 	Country    string `bson:"country"               json:"country"`
 }
 
@@ -106,6 +113,23 @@ type Location struct {
 	Lng         float64 `bson:"lng"                    json:"lng"`
 	Accuracy    string  `bson:"accuracy,omitempty"     json:"accuracy,omitempty"`
 	Source      string  `bson:"source"                 json:"source"`
-	PlaceID     string  `bson:"place_id,omitempty"     json:"placeId,omitempty"`
-	AddressHash string  `bson:"address_hash,omitempty" json:"addressHash,omitempty"`
+	PlaceID     string  `bson:"placeId,omitempty"     json:"placeId,omitempty"`
+	AddressHash string  `bson:"addressHash,omitempty" json:"addressHash,omitempty"`
+}
+
+// MarshalJSON emits V (and Raw) as plain JSON whatever shape they were
+// decoded in (see JSONValue).
+func (fv FieldValue) MarshalJSON() ([]byte, error) {
+	type plain FieldValue
+	p := plain(fv)
+	p.V = JSONValue(p.V)
+	return json.Marshal(p)
+}
+
+// MarshalJSON emits Value as plain JSON (see JSONValue).
+func (r RawValue) MarshalJSON() ([]byte, error) {
+	type plain RawValue
+	p := plain(r)
+	p.Value = JSONValue(p.Value)
+	return json.Marshal(p)
 }

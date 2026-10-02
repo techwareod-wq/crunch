@@ -63,6 +63,11 @@ apis:
   # Shared http.Client used by ApiClient.
   httpClient:
     timeoutSeconds: 60
+  # Google Geocoding (key: GOOGLE_MAPS_API_KEY). Draft saves geocode the
+  # address; search resolves place names (D-061, D-078).
+  geocode:
+    apiURL: "https://maps.googleapis.com/maps/api/geocode/json"
+    timeoutMillis: 800
   imageGen:
     defaultProvider: "openai"  # "openai" (gpt-image-2) or "gemini"
     gemini:
@@ -90,6 +95,10 @@ cron:
     # current rulesVersion (D-040 safety net). Off until needed.
     attributes_recompute_safety_net:
       enabled: false
+    # Daily media cleanup: unconfirmed uploads and long-unreferenced media
+    # (spec 03). Switched on at launch (OP-06).
+    catalog_media_gc:
+      enabled: false
 
 # WarehouseHub feature tunables. Each feature module adds its own sub-block
 # (attributes, catalog, search, aisearch, enquiries, analytics) as it lands.
@@ -104,3 +113,21 @@ warehousehub:
     cacheRefreshSeconds: 60
     # Warehouses per attributes.recompute_batch message.
     recomputeBatchSize: 200
+  catalog:
+    # An approver may approve their own submission (D-053).
+    allowSelfApprove: false
+    # Media limits (D-062).
+    maxPhotos: 30
+    maxPhotoBytes: 10485760   # 10 MB
+    maxDocBytes: 20971520     # 20 MB
+    # Media GC: unconfirmed uploads after this many hours; unreferenced
+    # media after this many days.
+    mediaGcPendingHours: 24
+    mediaGcUnreferencedDays: 30
+    # Admin list page sizes.
+    listDefault: 25
+    listMax: 100
+    # Public slugs / sitemap page size.
+    publicPageSize: 1000
+    # Max revisions per bulk-approve request.
+    bulkApproveMax: 100

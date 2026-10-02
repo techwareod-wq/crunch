@@ -147,3 +147,39 @@ func asArea(v any) (Area, bool) {
 	}
 	return a, true
 }
+
+// DecodeValue reads a canonical field value (typed, JSON- or BSON-decoded)
+// into T: string, bool, Area, Money, Address, Location, Range, …
+func DecodeValue[T any](v any) (T, bool) {
+	return decodeDoc[T](v)
+}
+
+// AsStrings reads a list-of-strings value in any of its shapes.
+func AsStrings(v any) ([]string, bool) { return asStrings(v) }
+
+// JSONValue converts BSON-decoded documents (primitive.D, which encodes to
+// JSON as a list of {Key, Value} pairs) into plain maps, recursively, so a
+// value read from Mongo serializes as the object it was stored from.
+func JSONValue(v any) any {
+	switch x := v.(type) {
+	case primitive.D:
+		m := make(map[string]any, len(x))
+		for _, e := range x {
+			m[e.Key] = JSONValue(e.Value)
+		}
+		return m
+	case bson.M:
+		m := make(map[string]any, len(x))
+		for k, e := range x {
+			m[k] = JSONValue(e)
+		}
+		return m
+	case primitive.A:
+		out := make([]any, len(x))
+		for i, e := range x {
+			out[i] = JSONValue(e)
+		}
+		return out
+	}
+	return v
+}

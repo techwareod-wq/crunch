@@ -9,6 +9,7 @@ import (
 	"github.com/atharva-ng/crunch/internal/modules"
 	apiclient "github.com/atharva-ng/crunch/internal/providers/impl/apiClient"
 	"github.com/atharva-ng/crunch/internal/providers/impl/clerkaccounts"
+	"github.com/atharva-ng/crunch/internal/providers/impl/geocode"
 	geminiimage "github.com/atharva-ng/crunch/internal/providers/impl/imageGen/gemini"
 	openaiimage "github.com/atharva-ng/crunch/internal/providers/impl/imageGen/openai"
 	llmutil "github.com/atharva-ng/crunch/internal/providers/impl/llm"
@@ -62,6 +63,11 @@ func InjectDefaultProviders(appCtx *config.AppContext, mods []modules.Module) er
 
 	appCtx.InternalServices.ImageGen = buildImageGenerator(appCtx)
 	appCtx.APIClient = apiclient.GetClient(time.Duration(appCtx.Config.Values.APIs.HTTPClient.TimeoutSeconds) * time.Second)
+	if key := appCtx.Config.Maps.GoogleAPIKey; key != "" {
+		gv := appCtx.Config.Values.APIs.Geocode
+		appCtx.Geocoder = geocode.NewGoogle(appCtx.APIClient, gv.APIURL, key, time.Duration(gv.TimeoutMillis)*time.Millisecond)
+		log.Info("Injected Google geocoder")
+	}
 
 	// Dispatcher depends on Queue, so it's created after Queue injection.
 	appCtx.InternalServices.Dispatcher = asynchandler.NewDispatcher(

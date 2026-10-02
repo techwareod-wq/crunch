@@ -226,3 +226,5 @@ func TestEvaluateBSONShapes(t *testing.T) {
 		t.Fatalf("ratio from BSON shapes = %v", v)
 	}
 }
+
+var zeroTime time.Time

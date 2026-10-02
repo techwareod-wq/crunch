@@ -204,7 +204,7 @@ func TestSubmitProblems(t *testing.T) {
 }
 
 func TestDecodeBSONShapes(t *testing.T) {
-	m, ok := decodeDoc[Money](mustD(map[string]any{"amount": int64(5000), "currency": "INR", "on_request": true}))
+	m, ok := decodeDoc[Money](mustD(map[string]any{"amount": int64(5000), "currency": "INR", "onRequest": true}))
 	if !ok || m.Amount != 5000 || !m.OnRequest {
 		t.Fatalf("money from BSON = %+v %v", m, ok)
 	}

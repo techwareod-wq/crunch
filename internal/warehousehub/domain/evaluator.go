@@ -306,3 +306,45 @@ func (e *evaluator) verdict(ind *Industry) Verdict {
 	}
 	return VerdictFit
 }
+
+// Completeness scores a listing for relevance (04): completeness is the share
+// of fields on yes nodes that hold a value (each unknown node counts as one
+// missing item; ratios count when computable), verified is the share of
+// stored values carrying a verifiedAt (D-031).
+func Completeness(s *Snapshot, a Attributes, r Result) (completeness, verified float64) {
+	var total, filled, stored, checked int
+	for i := range s.Nodes {
+		n := &s.Nodes[i]
+		switch r.State[n.Key] {
+		case StatusUnknown:
+			total++
+		case StatusYes:
+			for j := range n.Fields {
+				f := &n.Fields[j]
+				total++
+				if f.Type == TypeRatio {
+					if _, ok := r.Ratios[n.Key+"."+f.Key]; ok {
+						filled++
+					}
+					continue
+				}
+				fv := a.Value(n.Key, f.Key)
+				if fv == nil || fv.V == nil {
+					continue
+				}
+				filled++
+				stored++
+				if fv.VerifiedAt != nil {
+					checked++
+				}
+			}
+		}
+	}
+	if total > 0 {
+		completeness = float64(filled) / float64(total)
+	}
+	if stored > 0 {
+		verified = float64(checked) / float64(stored)
+	}
+	return completeness, verified
+}

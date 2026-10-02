@@ -40,7 +40,9 @@ type AppContext struct {
 	Config     AppConfig
 	S3Provider interfaces.S3
 	// APIClient is the shared outbound HTTP client (values.apis.httpClient).
-	APIClient              interfaces.ApiClient
+	APIClient interfaces.ApiClient
+	// Geocoder is nil when GOOGLE_MAPS_API_KEY is unset.
+	Geocoder               interfaces.Geocoder
 	QueueProvider          interfaces.Queue
 	SecondaryQueueProvider interfaces.Queue
 	IdempotencyStore       interfaces.IdempotencyStore
