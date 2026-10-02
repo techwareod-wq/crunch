@@ -177,7 +177,7 @@ func (h *harness) draft(t *testing.T) (*models.Warehouse, *models.WarehouseRevis
 	staff := h.readyMedia(w.ID, models.MediaDoc, models.DocAgreement, models.VisibilityStaff)
 	c.Media = []models.MediaRef{{MediaID: cover, IsCover: true}, {MediaID: staff}}
 	c.RentAdmin.AgreementMediaID = &staff
-	saved, err := h.svc.Save(ctx, editor, catalogService.SaveRequest{RevisionID: res.Revision.ID, Rev: res.Revision.Rev, Content: c})
+	saved, err := h.svc.Save(ctx, editor, catalogService.SaveRequest{RevisionID: res.Revision.ID, Rev: res.Revision.Rev, Content: c}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +271,7 @@ func TestSubmitGate(t *testing.T) {
 	}
 	c := r.Content
 	c.Attributes[domain.RootKey].Fields["location"] = fv(map[string]any{"lat": 18.5, "lng": 73.8, "source": "manual"})
-	r2, err := h.svc.Save(ctx, editor, catalogService.SaveRequest{RevisionID: r.ID, Rev: r.Rev, Content: c})
+	r2, err := h.svc.Save(ctx, editor, catalogService.SaveRequest{RevisionID: r.ID, Rev: r.Rev, Content: c}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,17 +284,17 @@ func TestSubmitGate(t *testing.T) {
 func TestSaveRules(t *testing.T) {
 	h := newHarness()
 	_, r := h.draft(t)
-	if _, err := h.svc.Save(ctx, editor, catalogService.SaveRequest{RevisionID: r.ID, Rev: r.Rev - 1, Content: r.Content}); code(err) != catalogService.CodeStale {
+	if _, err := h.svc.Save(ctx, editor, catalogService.SaveRequest{RevisionID: r.ID, Rev: r.Rev - 1, Content: r.Content}, ""); code(err) != catalogService.CodeStale {
 		t.Errorf("stale save: %v", err)
 	}
 	bad := r.Content
 	bad.Media = append(bad.Media, models.MediaRef{MediaID: primitive.NewObjectID()})
-	if _, err := h.svc.Save(ctx, editor, catalogService.SaveRequest{RevisionID: r.ID, Rev: r.Rev, Content: bad}); code(err) != "invalid" {
+	if _, err := h.svc.Save(ctx, editor, catalogService.SaveRequest{RevisionID: r.ID, Rev: r.Rev, Content: bad}, ""); code(err) != "invalid" {
 		t.Errorf("foreign media saved: %v", err)
 	}
 	h.svc.Submit(ctx, editor, r.ID, "")
 	r, _ = h.store.GetRevision(ctx, r.ID)
-	if _, err := h.svc.Save(ctx, editor, catalogService.SaveRequest{RevisionID: r.ID, Rev: r.Rev, Content: r.Content}); code(err) != catalogService.CodeInReview {
+	if _, err := h.svc.Save(ctx, editor, catalogService.SaveRequest{RevisionID: r.ID, Rev: r.Rev, Content: r.Content}, ""); code(err) != catalogService.CodeInReview {
 		t.Errorf("save in review: %v", err)
 	}
 }
@@ -363,7 +363,7 @@ func TestEditLiveAndStaleBase(t *testing.T) {
 	}
 	c := r.Content
 	c.Attributes[domain.RootKey].Fields["name"] = fv("Pune Mega Hub")
-	saved, err := h.svc.Save(ctx, editor, catalogService.SaveRequest{RevisionID: r.ID, Rev: r.Rev, Content: c})
+	saved, err := h.svc.Save(ctx, editor, catalogService.SaveRequest{RevisionID: r.ID, Rev: r.Rev, Content: c}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -565,14 +565,14 @@ func TestGeocodeRules(t *testing.T) {
 	// A hand-placed pin is kept when the address changes, with a warning.
 	c := r.Content
 	c.Attributes[domain.RootKey].Fields["location"] = fv(map[string]any{"lat": 18.6, "lng": 73.9, "source": "manual"})
-	res, err := h.svc.Save(ctx, editor, catalogService.SaveRequest{RevisionID: r.ID, Rev: r.Rev, Content: c})
+	res, err := h.svc.Save(ctx, editor, catalogService.SaveRequest{RevisionID: r.ID, Rev: r.Rev, Content: c}, "")
 	if err != nil || len(res.Warnings) != 0 {
 		t.Fatalf("manual pin: %v %v", err, res.Warnings)
 	}
 	c = res.Revision.Content
 	c.Attributes[domain.RootKey].Fields["address"] = fv(map[string]any{"line1": "Plot 9", "city": "Pune", "country": "IN"})
 	calls := h.geo.calls
-	res, err = h.svc.Save(ctx, editor, catalogService.SaveRequest{RevisionID: r.ID, Rev: res.Revision.Rev, Content: c})
+	res, err = h.svc.Save(ctx, editor, catalogService.SaveRequest{RevisionID: r.ID, Rev: res.Revision.Rev, Content: c}, "")
 	if err != nil || len(res.Warnings) != 1 || res.Warnings[0] != catalogService.WarnPinManual || h.geo.calls != calls {
 		t.Fatalf("address change under manual pin: %v %v", err, res.Warnings)
 	}
@@ -585,7 +585,7 @@ func TestGeocodeRules(t *testing.T) {
 	c = r2.Content
 	c.Attributes[domain.RootKey].Fields["address"] = fv(map[string]any{"line1": "Plot 1", "city": "Nashik", "country": "IN"})
 	h.geo.err = errors.New("timeout")
-	res, err = h.svc.Save(ctx, editor, catalogService.SaveRequest{RevisionID: r2.ID, Rev: r2.Rev, Content: c})
+	res, err = h.svc.Save(ctx, editor, catalogService.SaveRequest{RevisionID: r2.ID, Rev: r2.Rev, Content: c}, "")
 	if err != nil || len(res.Warnings) != 1 || res.Warnings[0] != catalogService.WarnGeocodePending || len(h.sent) != 1 {
 		t.Fatalf("geocode down: %v %v sent=%d", err, res.Warnings, len(h.sent))
 	}

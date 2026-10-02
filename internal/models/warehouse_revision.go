@@ -171,3 +171,20 @@ func (c ListingContent) MediaIDs() []primitive.ObjectID {
 	}
 	return out
 }
+
+// WarehouseRevisionStates reads the state of each revision in ids.
+func WarehouseRevisionStates(ctx context.Context, ids []primitive.ObjectID) (map[primitive.ObjectID]RevisionState, error) {
+	out := map[primitive.ObjectID]RevisionState{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := findAllDocs[WarehouseRevision](ctx, revisions(), bson.M{"_id": bson.M{"$in": ids}},
+		options.Find().SetProjection(bson.M{"state": 1}))
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		out[r.ID] = r.State
+	}
+	return out, nil
+}

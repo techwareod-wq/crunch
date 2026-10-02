@@ -122,6 +122,34 @@ type UploadResponse struct {
 	Headers map[string][]string `json:"headers,omitempty"`
 }
 
+// NeedsInfoAnswer answers one Needs-info item on one warehouse (D-039):
+// Status yes (with Fields holding at least the node's required values) or
+// no for an unknown node; Status empty to fill missing fields on a yes node.
+type NeedsInfoAnswer struct {
+	WarehouseID primitive.ObjectID            `json:"warehouseId"`
+	Node        string                        `json:"node"`
+	Status      models.NodeStatus             `json:"status,omitempty"`
+	Fields      map[string]*models.FieldValue `json:"fields,omitempty"`
+}
+
+// AnswerRequest is POST /v1/admin/needs-info/answer.
+type AnswerRequest struct {
+	Items []NeedsInfoAnswer `json:"items"`
+	// Submit sends each saved draft to review under the shared batchId.
+	Submit bool `json:"submit"`
+}
+
+// AnswerItem is one warehouse's result. OK = its answers were saved;
+// Submitted = it also went to review.
+type AnswerItem struct {
+	WarehouseID string `json:"warehouseId"`
+	OK          bool   `json:"ok"`
+	RevisionID  string `json:"revisionId,omitempty"`
+	Submitted   bool   `json:"submitted"`
+	Code        string `json:"code,omitempty"`
+	Error       string `json:"error,omitempty"`
+}
+
 // LookupResult is the public slug lookup outcome (spec 03 Slugs): a listing
 // (200), a redirect (301), or gone with nearby listings (410).
 type LookupResult struct {
@@ -138,7 +166,7 @@ type CatalogService interface {
 	Create(ctx context.Context, actor domain.Actor, content models.ListingContent) (*models.Warehouse, RevisionResult, error)
 	Open(ctx context.Context, actor domain.Actor, warehouseID primitive.ObjectID) (RevisionResult, error)
 	Restore(ctx context.Context, actor domain.Actor, warehouseID primitive.ObjectID) (RevisionResult, error)
-	Save(ctx context.Context, actor domain.Actor, req SaveRequest) (RevisionResult, error)
+	Save(ctx context.Context, actor domain.Actor, req SaveRequest, batchID string) (RevisionResult, error)
 	Submit(ctx context.Context, actor domain.Actor, revisionID primitive.ObjectID, batchID string) (RevisionResult, error)
 	Withdraw(ctx context.Context, actor domain.Actor, revisionID primitive.ObjectID) (RevisionResult, error)
 	Reject(ctx context.Context, actor domain.Actor, revisionID primitive.ObjectID, comment string) (RevisionResult, error)
@@ -154,6 +182,14 @@ type CatalogService interface {
 	GetRevision(ctx context.Context, revisionID primitive.ObjectID) (*models.WarehouseRevision, error)
 	RevisionHistory(ctx context.Context, warehouseID primitive.ObjectID) ([]models.WarehouseRevision, error)
 	ReviewQueue(ctx context.Context, page, limit int) ([]models.WarehouseRevision, int64, error)
+
+	// Needs-info queue (spec 02, D-039): live warehouses only.
+	NeedsInfoSummary(ctx context.Context) ([]dto.NeedsInfoKey, error)
+	NeedsInfoList(ctx context.Context, key string, page, limit int) ([]dto.NeedsInfoWarehouse, int64, error)
+	// AnswerNeedsInfo applies answers per warehouse into its open draft
+	// (opened from live when none), optionally submitting; in-review
+	// warehouses are skipped. Everything goes through review (D-050).
+	AnswerNeedsInfo(ctx context.Context, actor domain.Actor, req AnswerRequest) (string, []AnswerItem, error)
 
 	// Geocoding (D-061).
 	GeocodePreview(ctx context.Context, addr models.Address) (models.Location, error)

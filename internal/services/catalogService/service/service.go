@@ -197,8 +197,8 @@ func cloneContent(c models.ListingContent) models.ListingContent {
 
 // Save validates and stores a draft's content, geocodes a changed address
 // (D-061) and returns the evaluator preview. Required fields are not
-// enforced here.
-func (s *svc) Save(ctx context.Context, actor domain.Actor, req catalogService.SaveRequest) (catalogService.RevisionResult, error) {
+// enforced here. A non-empty batchID marks a Needs-info bulk answer (D-039).
+func (s *svc) Save(ctx context.Context, actor domain.Actor, req catalogService.SaveRequest, batchID string) (catalogService.RevisionResult, error) {
 	old, err := s.loadRevision(ctx, req.RevisionID)
 	if err != nil {
 		return catalogService.RevisionResult{}, err
@@ -224,7 +224,11 @@ func (s *svc) Save(ctx context.Context, actor domain.Actor, req catalogService.S
 
 	r := cloneRevision(old)
 	r.Content = content
-	if err := s.transition(ctx, actor, old, &r, domain.ActionUpdate, nil); err != nil {
+	action, meta := domain.ActionUpdate, map[string]any(nil)
+	if batchID != "" {
+		action, meta = domain.ActionBulkAnswer, map[string]any{"batchId": batchID}
+	}
+	if err := s.transition(ctx, actor, old, &r, action, meta); err != nil {
 		return catalogService.RevisionResult{}, err
 	}
 	name, city := draftName(content.Attributes)

@@ -81,6 +81,31 @@ type IndustryPatch struct {
 	Preferred       *[]models.Condition `json:"preferred,omitempty"`
 }
 
+// DeleteTarget names a hard delete (D-129, superuser): a node with its
+// subtree (Field empty), a field (Option empty) or a pick/multi option.
+// Confirm=false only previews.
+type DeleteTarget struct {
+	Node            string `json:"node"`
+	Field           string `json:"field,omitempty"`
+	Option          string `json:"option,omitempty"`
+	ExpectedVersion int    `json:"expectedVersion"`
+	Confirm         bool   `json:"confirm"`
+}
+
+// DeletePreview is the confirm screen: what goes, how many warehouses hold
+// values, and what blocks the delete (empty = allowed).
+type DeletePreview struct {
+	// Nodes is the node and its descendants (node delete only).
+	Nodes []string `json:"nodes"`
+	// Warehouses holding values that the strip job will remove (for an
+	// option: warehouses using it, which blocks the delete).
+	Warehouses int64    `json:"warehouses"`
+	BlockedBy  []string `json:"blockedBy"`
+	// BatchID ties the strip job's change_log rows together (confirmed
+	// deletes only).
+	BatchID string `json:"batchId,omitempty"`
+}
+
 // Recompute (spec 02, D-040): every rules write dispatches recompute_all,
 // which pages the stale live/archived warehouses and fans out
 // recompute_batch messages; each batch evaluates and BulkWrites projections.
@@ -92,6 +117,22 @@ const (
 	// use "sn-YYYYMMDD" so their keys never collide with it.
 	RunRules = "rules"
 )
+
+// ProcessStrip removes deleted nodes / fields from every live copy and open
+// revision (D-129).
+const ProcessStrip pipeline.ProcessType = "attributes.strip"
+
+// StripPayload is the attributes.strip body. Paths are relative to
+// `attributes` ("cold_storage", "cold_storage.fields.temperature").
+type StripPayload struct {
+	Paths   []string `json:"paths"`
+	BatchID string   `json:"batchId"`
+	// Target is the deleted node or "<node>.<field>" (change_log meta).
+	Target string `json:"target"`
+}
+
+// StripKey is the stable message id of one strip run.
+func StripKey(batchID string) string { return "strip:" + batchID }
 
 // RecomputeAllPayload is the attributes.recompute_all body.
 type RecomputeAllPayload struct {
@@ -137,6 +178,12 @@ type AttributeService interface {
 	UpdateField(ctx context.Context, actor domain.Actor, nodeKey string, expected int, f models.AttributeField) (models.AttributeNode, WriteResult, error)
 	ReorderFields(ctx context.Context, actor domain.Actor, nodeKey string, expected int, keys []string) (models.AttributeNode, WriteResult, error)
 
+	// DeleteDefinition hard-deletes a node (with its subtree), a field or an
+	// option (D-129/D-138). Blocked while an industry rule or a ratio field
+	// references it, or (option) while a warehouse uses it; the root and
+	// locked fields are never deleted. Values are stripped by attributes.strip.
+	DeleteDefinition(ctx context.Context, actor domain.Actor, t DeleteTarget) (DeletePreview, WriteResult, error)
+
 	// Industry writes (delete is superuser-only at the route).
 	CreateIndustry(ctx context.Context, actor domain.Actor, ind models.Industry) (models.Industry, WriteResult, error)
 	UpdateIndustry(ctx context.Context, actor domain.Actor, p IndustryPatch) (models.Industry, WriteResult, error)
@@ -145,4 +192,5 @@ type AttributeService interface {
 	// Async handlers.
 	RecomputeAll(ctx context.Context, p RecomputeAllPayload) error
 	RecomputeBatch(ctx context.Context, p RecomputeBatchPayload) error
+	Strip(ctx context.Context, p StripPayload) error
 }

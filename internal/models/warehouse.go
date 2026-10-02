@@ -393,3 +393,44 @@ func WriteWarehouseProjections(ctx context.Context, ps map[primitive.ObjectID]Pr
 	}
 	return res.ModifiedCount, nil
 }
+
+// NeedsInfoCounts counts live warehouses per Needs-info key (02 Needs-info
+// summary).
+func NeedsInfoCounts(ctx context.Context) (map[string]int64, error) {
+	cur, err := warehouses().Aggregate(ctx, mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{"status": WarehouseLive, "needs_info_count": bson.M{"$gt": 0}}}},
+		{{Key: "$unwind", Value: "$needs_info"}},
+		{{Key: "$group", Value: bson.M{"_id": "$needs_info", "n": bson.M{"$sum": 1}}}},
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+	out := map[string]int64{}
+	for cur.Next(ctx) {
+		var row struct {
+			Key string `bson:"_id"`
+			N   int64  `bson:"n"`
+		}
+		if err := cur.Decode(&row); err != nil {
+			return nil, err
+		}
+		out[row.Key] = row.N
+	}
+	return out, cur.Err()
+}
+
+// ListNeedsInfoWarehouses pages the live warehouses whose Needs-info holds
+// key, by name (without the live content).
+func ListNeedsInfoWarehouses(ctx context.Context, key string, page, limit int) ([]Warehouse, int64, error) {
+	q := bson.M{"status": WarehouseLive, "needs_info": key}
+	total, err := warehouses().CountDocuments(ctx, q)
+	if err != nil {
+		return nil, 0, err
+	}
+	items, err := findAllDocs[Warehouse](ctx, warehouses(), q, options.Find().
+		SetSort(bson.D{{Key: "name", Value: 1}, {Key: "_id", Value: 1}}).
+		SetSkip(skipFor(page, limit)).SetLimit(int64(limit)).
+		SetProjection(bson.M{"live": 0, "embedding": 0}))
+	return items, total, err
+}

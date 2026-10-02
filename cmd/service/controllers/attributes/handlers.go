@@ -47,6 +47,11 @@ type deleteIndustryRequest struct {
 	ExpectedVersion int    `json:"expectedVersion"`
 }
 
+type deleteResponse struct {
+	attributeService.DeletePreview
+	attributeService.WriteResult
+}
+
 type treeResponse struct {
 	RulesVersion int64             `json:"rulesVersion"`
 	Tree         []domain.TreeNode `json:"tree"`
@@ -222,4 +227,46 @@ func HandleIndustryDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	res, err := service(r).DeleteIndustry(r.Context(), actorOf(r), req.Key, req.ExpectedVersion)
 	send(w, r, http.StatusOK, res, err)
+}
+
+// handleDelete runs one hard-delete endpoint; check rejects a body that
+// names the wrong kind of target.
+func handleDelete(w http.ResponseWriter, r *http.Request, check func(attributeService.DeleteTarget) string) {
+	req, ok := body[attributeService.DeleteTarget](w, r)
+	if !ok {
+		return
+	}
+	if msg := check(req); msg != "" {
+		middleware.SendJSONError(w, r, &apperrors.Error{Code: http.StatusBadRequest, Message: msg, ErrCode: "invalid_request"})
+		return
+	}
+	pv, res, err := service(r).DeleteDefinition(r.Context(), actorOf(r), req)
+	send(w, r, http.StatusOK, deleteResponse{DeletePreview: pv, WriteResult: res}, err)
+}
+
+func HandleNodeDelete(w http.ResponseWriter, r *http.Request) {
+	handleDelete(w, r, func(t attributeService.DeleteTarget) string {
+		if t.Node == "" || t.Field != "" || t.Option != "" {
+			return "node delete takes node only"
+		}
+		return ""
+	})
+}
+
+func HandleFieldDelete(w http.ResponseWriter, r *http.Request) {
+	handleDelete(w, r, func(t attributeService.DeleteTarget) string {
+		if t.Node == "" || t.Field == "" || t.Option != "" {
+			return "field delete takes node and field"
+		}
+		return ""
+	})
+}
+
+func HandleOptionDelete(w http.ResponseWriter, r *http.Request) {
+	handleDelete(w, r, func(t attributeService.DeleteTarget) string {
+		if t.Node == "" || t.Field == "" || t.Option == "" {
+			return "option delete takes node, field and option"
+		}
+		return ""
+	})
 }

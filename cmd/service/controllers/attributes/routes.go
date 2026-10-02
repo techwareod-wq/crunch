@@ -12,7 +12,8 @@ import (
 
 // Handle registers the attribute tree + industry routes (spec 02 "Admin
 // endpoints"): reads for any admin, tree/industry writes for the
-// `attributes` permission, industry delete for superusers (D-122).
+// `attributes` permission, hard deletes (nodes/fields/options, industries)
+// for superusers (D-122, D-129).
 func Handle(appCtx *config.AppContext) {
 	route := func(path string, h http.HandlerFunc, method string, body func(http.Handler) http.Handler, required ...authz.Permission) {
 		p := middleware.Handle(path, h).
@@ -37,6 +38,9 @@ func Handle(appCtx *config.AppContext) {
 	route("/v1/admin/attributes/fields/create", HandleFieldCreate, post, middleware.DeserializeJson[fieldRequest](), attrs)
 	route("/v1/admin/attributes/fields/update", HandleFieldUpdate, post, middleware.DeserializeJson[fieldRequest](), attrs)
 	route("/v1/admin/attributes/fields/reorder", HandleFieldReorder, post, middleware.DeserializeJson[reorderFieldsRequest](), attrs)
+	route("/v1/admin/attributes/nodes/delete", HandleNodeDelete, post, middleware.DeserializeJson[attributeService.DeleteTarget](), authz.PermSuperuser)
+	route("/v1/admin/attributes/fields/delete", HandleFieldDelete, post, middleware.DeserializeJson[attributeService.DeleteTarget](), authz.PermSuperuser)
+	route("/v1/admin/attributes/options/delete", HandleOptionDelete, post, middleware.DeserializeJson[attributeService.DeleteTarget](), authz.PermSuperuser)
 
 	route("/v1/admin/industries", HandleIndustries, get, nil)
 	route("/v1/admin/industries/create", HandleIndustryCreate, post, middleware.DeserializeJson[models.Industry](), attrs)

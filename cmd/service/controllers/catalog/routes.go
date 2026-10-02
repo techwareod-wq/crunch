@@ -10,7 +10,7 @@ import (
 )
 
 // Handle registers the catalog routes (spec 03): admin listing lifecycle,
-// media and geocoding under /v1/admin, and the public listing API under
+// the Needs-info queue, media and geocoding under /v1/admin, and the public listing API under
 // /v1/public (no auth, allowlisted DTOs).
 func Handle(appCtx *config.AppContext) {
 	admin := func(path string, h http.HandlerFunc, perm authz.Permission, method string, body func(http.Handler) http.Handler) {
@@ -46,6 +46,11 @@ func Handle(appCtx *config.AppContext) {
 	admin("/v1/admin/revisions/bulk-approve", HandleBulkApprove, approve, post, middleware.DeserializeJson[bulkApproveRequest]())
 	admin("/v1/admin/revisions/queue", HandleQueue, read, get, nil)
 	admin("/v1/admin/revisions/history", HandleHistory, read, get, nil)
+
+	// Needs-info queue (spec 02, D-039).
+	admin("/v1/admin/needs-info/summary", HandleNeedsInfoSummary, read, get, nil)
+	admin("/v1/admin/needs-info/list", HandleNeedsInfoList, read, get, nil)
+	admin("/v1/admin/needs-info/answer", HandleNeedsInfoAnswer, edit, post, middleware.DeserializeJson[catalogService.AnswerRequest]())
 
 	admin("/v1/admin/geocode/preview", HandleGeocodePreview, edit, post, middleware.DeserializeJson[geocodeRequest]())
 	admin("/v1/admin/media", HandleMediaList, read, get, nil)

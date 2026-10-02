@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
 
@@ -26,6 +27,8 @@ type Store interface {
 	InsertIndustry(ctx context.Context, ind *models.Industry) error
 	ReplaceIndustry(ctx context.Context, ind *models.Industry, expected int) error
 	DeleteIndustry(ctx context.Context, key string, expected int) error
+	// DeleteNode CAS-deletes a node on version.
+	DeleteNode(ctx context.Context, key string, expected int) error
 
 	// StaleWarehouseIDs pages (by _id) live/archived warehouses whose
 	// projection is older than version.
@@ -34,6 +37,20 @@ type Store interface {
 	// WriteProjections sets each projection, guarded so a doc already at (or
 	// past) the projection's rules version is left alone.
 	WriteProjections(ctx context.Context, ps map[primitive.ObjectID]models.Projection) (int64, error)
+
+	// MarkNodeUnknown writes {status: unknown} for a new node onto every live
+	// copy and open revision whose parent node is yes (D-128). Idempotent;
+	// returns the warehouse ids touched.
+	MarkNodeUnknown(ctx context.Context, key, parent string, at time.Time) ([]primitive.ObjectID, error)
+	// CountHolding counts warehouses whose live copy or open revision holds
+	// any of paths (relative to `attributes`).
+	CountHolding(ctx context.Context, paths []string) (int64, error)
+	// CountUsingOption counts warehouses whose live copy or open revision
+	// uses option on node.field.
+	CountUsingOption(ctx context.Context, node, field, option string) (int64, error)
+	// Strip removes paths from every live copy and open revision; returns
+	// the warehouse ids touched.
+	Strip(ctx context.Context, paths []string, at time.Time) ([]primitive.ObjectID, error)
 }
 
 type store struct{}
@@ -96,4 +113,24 @@ func (s *store) WarehouseEvalDocs(ctx context.Context, ids []primitive.ObjectID)
 
 func (s *store) WriteProjections(ctx context.Context, ps map[primitive.ObjectID]models.Projection) (int64, error) {
 	return models.WriteWarehouseProjections(ctx, ps)
+}
+
+func (s *store) MarkNodeUnknown(ctx context.Context, key, parent string, at time.Time) ([]primitive.ObjectID, error) {
+	return models.MarkNodeUnknown(ctx, key, parent, at)
+}
+
+func (s *store) DeleteNode(ctx context.Context, key string, expected int) error {
+	return models.DeleteAttributeNode(ctx, key, expected)
+}
+
+func (s *store) CountHolding(ctx context.Context, paths []string) (int64, error) {
+	return models.CountWarehousesHolding(ctx, paths)
+}
+
+func (s *store) CountUsingOption(ctx context.Context, node, field, option string) (int64, error) {
+	return models.CountWarehousesUsingOption(ctx, node, field, option)
+}
+
+func (s *store) Strip(ctx context.Context, paths []string, at time.Time) ([]primitive.ObjectID, error) {
+	return models.StripAttributes(ctx, paths, at)
 }

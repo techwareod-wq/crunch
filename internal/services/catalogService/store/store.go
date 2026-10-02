@@ -33,6 +33,11 @@ type Store interface {
 	// ListLive pages live warehouses by _id (public slugs / sitemap).
 	ListLive(ctx context.Context, page, limit int) ([]models.Warehouse, error)
 
+	// NeedsInfoCounts counts live warehouses per Needs-info key.
+	NeedsInfoCounts(ctx context.Context) (map[string]int64, error)
+	// NeedsInfoWarehouses pages live warehouses whose Needs-info holds key.
+	NeedsInfoWarehouses(ctx context.Context, key string, page, limit int) ([]models.Warehouse, int64, error)
+
 	// revisions
 	InsertRevision(ctx context.Context, r *models.WarehouseRevision) error // models.ErrDuplicateKey when one is already open
 	GetRevision(ctx context.Context, id primitive.ObjectID) (*models.WarehouseRevision, error)
@@ -45,6 +50,8 @@ type Store interface {
 	// Queue pages in-review revisions, oldest submission first (no content).
 	Queue(ctx context.Context, page, limit int) ([]models.WarehouseRevision, int64, error)
 	DeleteRevisions(ctx context.Context, warehouseID primitive.ObjectID) error
+	// RevisionStates reads the state of each revision in ids.
+	RevisionStates(ctx context.Context, ids []primitive.ObjectID) (map[primitive.ObjectID]models.RevisionState, error)
 
 	// media
 	InsertMedia(ctx context.Context, m *models.WarehouseMedia) error
@@ -183,4 +190,16 @@ func (s *store) UpsertRent(ctx context.Context, r models.WarehouseRent) error {
 
 func (s *store) BumpCatalogVersion(ctx context.Context) (int64, error) {
 	return models.BumpCounter(ctx, models.CounterCatalogVersion)
+}
+
+func (s *store) NeedsInfoCounts(ctx context.Context) (map[string]int64, error) {
+	return models.NeedsInfoCounts(ctx)
+}
+
+func (s *store) NeedsInfoWarehouses(ctx context.Context, key string, page, limit int) ([]models.Warehouse, int64, error) {
+	return models.ListNeedsInfoWarehouses(ctx, key, page, limit)
+}
+
+func (s *store) RevisionStates(ctx context.Context, ids []primitive.ObjectID) (map[primitive.ObjectID]models.RevisionState, error) {
+	return models.WarehouseRevisionStates(ctx, ids)
 }

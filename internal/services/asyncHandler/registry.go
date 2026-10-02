@@ -35,6 +35,9 @@ func registerAttributeHandlers(registry Registry, locator *ServiceLocator) {
 	registry.Register(attributeService.ProcessRecomputeBatch, Typed(func(ctx context.Context, _ string, p attributeService.RecomputeBatchPayload) error {
 		return svc.RecomputeBatch(ctx, p)
 	}))
+	registry.Register(attributeService.ProcessStrip, Typed(func(ctx context.Context, _ string, p attributeService.StripPayload) error {
+		return svc.Strip(ctx, p)
+	}))
 }
 
 func registerCatalogHandlers(registry Registry, locator *ServiceLocator) {

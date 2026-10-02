@@ -177,6 +177,19 @@ func ReplaceAttributeNode(ctx context.Context, n *AttributeNode, expected int) e
 	return casReplaceByKey(ctx, attributeNodesCollection, n.Key, expected, n)
 }
 
+// DeleteAttributeNode CAS-deletes a node on version; ErrVersionConflict on a
+// mismatch.
+func DeleteAttributeNode(ctx context.Context, key string, expected int) error {
+	res, err := Collection(attributeNodesCollection).DeleteOne(ctx, bson.M{"key": key, "version": expected})
+	if err != nil {
+		return err
+	}
+	if res.DeletedCount == 0 {
+		return ErrVersionConflict
+	}
+	return nil
+}
+
 // --- shared helpers for the WarehouseHub models ---
 
 func findAllDocs[T any](ctx context.Context, coll *mongo.Collection, filter any, opts ...*options.FindOptions) ([]T, error) {

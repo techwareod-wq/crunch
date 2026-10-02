@@ -7,6 +7,7 @@ import (
 	"github.com/atharva-ng/crunch/internal/services/attributeService"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/atharva-ng/crunch/internal/warehousehub/domain"
 )
@@ -326,5 +327,236 @@ func TestRecompute(t *testing.T) {
 	h.store.BumpRulesVersion(ctx)
 	if err := h.svc.RecomputeAll(ctx, attributeService.RecomputeAllPayload{RulesVersion: v, Run: attributeService.RunRules}); err != nil || len(h.sent) != 0 {
 		t.Errorf("superseded run dispatched %d", len(h.sent))
+	}
+}
+
+func TestCreateNodeUnknownMarkers(t *testing.T) {
+	h := newHarness().booted()
+	if _, _, err := h.svc.CreateNode(ctx, actor, coldStorage(), attributeService.DefaultNo); err != nil {
+		t.Fatal(err)
+	}
+	yes := func(extra models.Attributes) models.Attributes {
+		a := models.Attributes{domain.RootKey: {Status: domain.StatusYes}}
+		for k, v := range extra {
+			a[k] = v
+		}
+		return a
+	}
+	w := h.warehouses
+	coldYes := w.add(models.WarehouseLive, yes(models.Attributes{"cold_storage": {Status: domain.StatusYes}}))
+	coldNo := w.add(models.WarehouseLive, yes(nil))
+	openDraft := w.addRev(coldNo, true, yes(models.Attributes{"cold_storage": {Status: domain.StatusYes}}))
+	closedRev := w.addRev(coldNo, false, yes(models.Attributes{"cold_storage": {Status: domain.StatusYes}}))
+	h.sent, h.cl.Entries = nil, nil
+
+	// No writes nothing.
+	if _, _, err := h.svc.CreateNode(ctx, actor, models.AttributeNode{Key: "humid", ParentKey: "cold_storage", Name: "Humidity"}, attributeService.DefaultNo); err != nil {
+		t.Fatal(err)
+	}
+	if _, has := w.docs[coldYes].Live.Attributes["humid"]; has || len(h.cl.Entries) != 1 {
+		t.Fatalf("default no wrote markers: entries=%d", len(h.cl.Entries))
+	}
+
+	// Unknown marks live + open draft where the parent is yes, and nothing else.
+	h.cl.Entries = nil
+	if _, _, err := h.svc.CreateNode(ctx, actor, models.AttributeNode{Key: "temp_control", ParentKey: "cold_storage", Name: "Temp control"}, attributeService.DefaultUnknown); err != nil {
+		t.Fatal(err)
+	}
+	if st := w.docs[coldYes].Live.Attributes["temp_control"].Status; st != domain.StatusUnknown {
+		t.Errorf("live (parent yes) = %q", st)
+	}
+	if _, has := w.docs[coldNo].Live.Attributes["temp_control"]; has {
+		t.Error("live with parent absent got a marker")
+	}
+	if r := w.revs[openDraft]; r.attrs["temp_control"].Status != domain.StatusUnknown || r.rev != 2 {
+		t.Errorf("open draft = %+v", r)
+	}
+	if r := w.revs[closedRev]; len(r.attrs) != 2 || r.rev != 1 {
+		t.Errorf("closed revision touched: %+v", r)
+	}
+	// One row per warehouse + the node create, all under one batch.
+	if len(h.cl.Entries) != 3 {
+		t.Fatalf("entries = %d, want 3", len(h.cl.Entries))
+	}
+	create := h.cl.Entries[2]
+	if create.Entity != domain.EntityAttributeDef || create.Meta["marked"] != 2 {
+		t.Errorf("create entry = %+v", create)
+	}
+	for _, e := range h.cl.Entries[:2] {
+		if e.Entity != domain.EntityWarehouse || e.Meta["batchId"] != create.Meta["batchId"] {
+			t.Errorf("marker entry = %+v", e)
+		}
+	}
+	// The recompute is dispatched after the markers.
+	if len(h.sent) == 0 || h.sent[len(h.sent)-1].pt != attributeService.ProcessRecomputeAll {
+		t.Errorf("recompute not dispatched: %+v", h.sent)
+	}
+
+	// Idempotent: a re-run marks nothing new.
+	if ids, _ := w.MarkNodeUnknown(ctx, "temp_control", "cold_storage", time.Time{}); len(ids) != 0 {
+		t.Errorf("re-run marked %d", len(ids))
+	}
+}
+
+func del(node, field, option string, version int, confirm bool) attributeService.DeleteTarget {
+	return attributeService.DeleteTarget{Node: node, Field: field, Option: option, ExpectedVersion: version, Confirm: confirm}
+}
+
+func TestDeleteGuards(t *testing.T) {
+	h := newHarness().booted()
+	cold, _, _ := h.svc.CreateNode(ctx, actor, coldStorage(), attributeService.DefaultNo)
+	h.svc.CreateNode(ctx, actor, models.AttributeNode{Key: "temp_control", ParentKey: "cold_storage", Name: "Temp control"}, attributeService.DefaultNo)
+	infra := models.AttributeNode{Key: "infra", ParentKey: domain.RootKey, Name: "Infra", Fields: []models.AttributeField{
+		{Key: "docks", Name: "Docks", Type: domain.TypeNumber, Unit: &models.UnitSpec{Family: domain.DimCount}},
+		{Key: "dock_ratio", Name: "Dock ratio", Type: domain.TypeRatio,
+			Ratio: &models.RatioSpec{Top: "infra.docks", Bottom: "warehouse.total_area", Per: 10000, BottomUnit: domain.UnitSqft}},
+	}}
+	if _, _, err := h.svc.CreateNode(ctx, actor, infra, attributeService.DefaultNo); err != nil {
+		t.Fatal(err)
+	}
+	h.svc.CreateIndustry(ctx, actor, models.Industry{Key: "food", Name: "Food",
+		Required:  []models.Condition{{Node: "temp_control", Cmp: domain.CmpIsYes}},
+		Preferred: []models.Condition{{Node: "cold_storage", Field: "temp_type", Cmp: domain.CmpEq, Value: "frozen"}}})
+	root := h.node(domain.RootKey)
+
+	// Root and locked fields are never deletable.
+	if _, _, err := h.svc.DeleteDefinition(ctx, actor, del(domain.RootKey, "", "", root.Version, true)); !isValidation(err) {
+		t.Errorf("root delete: %v", err)
+	}
+	if _, _, err := h.svc.DeleteDefinition(ctx, actor, del(domain.RootKey, "name", "", root.Version, true)); !isValidation(err) {
+		t.Errorf("locked field delete: %v", err)
+	}
+	// An industry rule on a descendant blocks the node delete; preview lists it.
+	pv, _, err := h.svc.DeleteDefinition(ctx, actor, del("cold_storage", "", "", cold.Version, false))
+	if err != nil || !slices.Equal(pv.Nodes, []string{"cold_storage", "temp_control"}) || !slices.Contains(pv.BlockedBy, "industry food") {
+		t.Fatalf("preview = %+v, %v", pv, err)
+	}
+	if _, _, err := h.svc.DeleteDefinition(ctx, actor, del("cold_storage", "", "", cold.Version, true)); !isValidation(err) {
+		t.Errorf("blocked delete went through: %v", err)
+	}
+	// A rule on an option blocks the option delete.
+	if pv, _, _ := h.svc.DeleteDefinition(ctx, actor, del("cold_storage", "temp_type", "frozen", cold.Version, false)); !slices.Contains(pv.BlockedBy, "industry food") {
+		t.Errorf("option preview = %+v", pv)
+	}
+	// A ratio input can't be deleted while the ratio exists.
+	inf := h.node("infra")
+	if pv, _, _ := h.svc.DeleteDefinition(ctx, actor, del("infra", "docks", "", inf.Version, false)); !slices.Contains(pv.BlockedBy, "ratio field infra.dock_ratio") {
+		t.Errorf("ratio preview = %+v", pv)
+	}
+	// Deleting the whole node takes the ratio with it: allowed.
+	if pv, _, _ := h.svc.DeleteDefinition(ctx, actor, del("infra", "", "", inf.Version, false)); len(pv.BlockedBy) != 0 {
+		t.Errorf("infra preview = %+v", pv)
+	}
+	// An option in use blocks; one not in use goes, with no strip.
+	h.warehouses.add(models.WarehouseLive, models.Attributes{domain.RootKey: {Status: domain.StatusYes},
+		"cold_storage": {Status: domain.StatusYes, Fields: map[string]*models.FieldValue{"temp_type": {V: "chilled"}}}})
+	cold = h.node("cold_storage")
+	if pv, _, err := h.svc.DeleteDefinition(ctx, actor, del("cold_storage", "temp_type", "chilled", cold.Version, true)); !isValidation(err) || pv.Warehouses != 1 {
+		t.Errorf("option in use: %+v %v", pv, err)
+	}
+	h.svc.UpdateIndustry(ctx, actor, attributeService.IndustryPatch{Key: "food", ExpectedVersion: 1, Preferred: &[]models.Condition{}})
+	h.sent = nil
+	if _, _, err := h.svc.DeleteDefinition(ctx, actor, del("cold_storage", "temp_type", "frozen", cold.Version, true)); err != nil {
+		t.Fatal(err)
+	}
+	cs := h.node("cold_storage")
+	if f, _ := cs.Field("temp_type"); f.HasOption("frozen") || !f.HasOption("chilled") {
+		t.Errorf("options = %+v", f.Options)
+	}
+	for _, d := range h.sent {
+		if d.pt == attributeService.ProcessStrip {
+			t.Error("option delete dispatched a strip")
+		}
+	}
+}
+
+func TestDeleteNodeAndStrip(t *testing.T) {
+	h := newHarness().booted()
+	h.svc.CreateNode(ctx, actor, coldStorage(), attributeService.DefaultNo)
+	h.svc.CreateNode(ctx, actor, models.AttributeNode{Key: "temp_control", ParentKey: "cold_storage", Name: "Temp control"}, attributeService.DefaultNo)
+	attrs := func() models.Attributes {
+		return models.Attributes{domain.RootKey: {Status: domain.StatusYes},
+			"cold_storage": {Status: domain.StatusYes, Fields: map[string]*models.FieldValue{"temperature": {V: -18.0}}},
+			"temp_control": {Status: domain.StatusUnknown}}
+	}
+	w := h.warehouses
+	live := w.add(models.WarehouseLive, attrs())
+	draft := w.addRev(live, true, attrs())
+	old := w.addRev(live, false, attrs())
+	h.sent, h.cl.Entries = nil, nil
+
+	cold := h.node("cold_storage")
+	pv, res, err := h.svc.DeleteDefinition(ctx, actor, del("cold_storage", "", "", cold.Version, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pv.Warehouses != 1 || pv.BatchID == "" || len(res.Changed) != 2 {
+		t.Fatalf("pv = %+v res = %+v", pv, res)
+	}
+	snap, _ := h.store.Load(ctx)
+	if _, ok := snap.Node("temp_control"); ok {
+		t.Error("descendant survived")
+	}
+	// Leaf-first, then recompute, then strip.
+	if h.cl.Entries[0].EntityID != "temp_control" || h.cl.Entries[1].EntityID != "cold_storage" {
+		t.Errorf("delete order = %s, %s", h.cl.Entries[0].EntityID, h.cl.Entries[1].EntityID)
+	}
+	last := h.sent[len(h.sent)-1]
+	if last.pt != attributeService.ProcessStrip || last.key != attributeService.StripKey(pv.BatchID) {
+		t.Fatalf("strip not dispatched last: %+v", h.sent)
+	}
+
+	// Key reuse is refused until the strip has run.
+	if _, _, err := h.svc.CreateNode(ctx, actor, coldStorage(), attributeService.DefaultNo); !isValidation(err) {
+		t.Errorf("reuse before strip: %v", err)
+	}
+
+	h.cl.Entries = nil
+	p := last.payload.(attributeService.StripPayload)
+	if err := h.svc.Strip(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	if a := w.docs[live].Live.Attributes; len(a) != 1 {
+		t.Errorf("live not stripped: %+v", a)
+	}
+	if r := w.revs[draft]; len(r.attrs) != 1 || r.rev != 2 {
+		t.Errorf("draft not stripped: %+v", r)
+	}
+	if r := w.revs[old]; len(r.attrs) != 3 {
+		t.Error("closed revision stripped")
+	}
+	if len(h.cl.Entries) != 1 || h.cl.Entries[0].Meta["batchId"] != pv.BatchID {
+		t.Errorf("strip log = %+v", h.cl.Entries)
+	}
+	// Idempotent re-run; the key is free again.
+	h.cl.Entries = nil
+	if err := h.svc.Strip(ctx, p); err != nil || len(h.cl.Entries) != 0 {
+		t.Errorf("re-run: %v, %d entries", err, len(h.cl.Entries))
+	}
+	if _, _, err := h.svc.CreateNode(ctx, actor, coldStorage(), attributeService.DefaultNo); err != nil {
+		t.Errorf("reuse after strip: %v", err)
+	}
+}
+
+func TestDeleteField(t *testing.T) {
+	h := newHarness().booted()
+	cold, _, _ := h.svc.CreateNode(ctx, actor, coldStorage(), attributeService.DefaultNo)
+	live := h.warehouses.add(models.WarehouseLive, models.Attributes{domain.RootKey: {Status: domain.StatusYes},
+		"cold_storage": {Status: domain.StatusYes, Fields: map[string]*models.FieldValue{"temperature": {V: -18.0}, "temp_type": {V: "frozen"}}}})
+	if _, _, err := h.svc.DeleteDefinition(ctx, actor, del("cold_storage", "temperature", "", cold.Version+1, true)); !errors.Is(err, attributeService.ErrVersionConflict) {
+		t.Errorf("stale version: %v", err)
+	}
+	pv, _, err := h.svc.DeleteDefinition(ctx, actor, del("cold_storage", "temperature", "", cold.Version, true))
+	if err != nil || pv.Warehouses != 1 {
+		t.Fatalf("%+v %v", pv, err)
+	}
+	if cs := h.node("cold_storage"); func() bool { _, ok := cs.Field("temperature"); return ok }() {
+		t.Error("field survived")
+	}
+	last := h.sent[len(h.sent)-1]
+	h.svc.Strip(ctx, last.payload.(attributeService.StripPayload))
+	f := h.warehouses.docs[live].Live.Attributes["cold_storage"].Fields
+	if _, has := f["temperature"]; has || f["temp_type"] == nil {
+		t.Errorf("fields after strip = %+v", f)
 	}
 }

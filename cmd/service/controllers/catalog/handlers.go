@@ -15,6 +15,7 @@ import (
 	"github.com/atharva-ng/crunch/internal/middleware"
 	"github.com/atharva-ng/crunch/internal/models"
 	"github.com/atharva-ng/crunch/internal/services/catalogService"
+	"github.com/atharva-ng/crunch/internal/services/catalogService/dto"
 	"github.com/atharva-ng/crunch/internal/warehousehub/domain"
 )
 
@@ -240,7 +241,7 @@ func HandleSave(w http.ResponseWriter, r *http.Request) {
 	if !ok || !requireID(w, r, req.RevisionID, "revisionId") {
 		return
 	}
-	res, err := service(r).Save(r.Context(), actorOf(r), req)
+	res, err := service(r).Save(r.Context(), actorOf(r), req, "")
 	send(w, r, http.StatusOK, res, err)
 }
 
@@ -411,4 +412,41 @@ func HandlePublicSlugs(withCover bool) http.HandlerFunc {
 		items, err := service(r).PublicSlugs(r.Context(), pg, withCover)
 		send(w, r, http.StatusOK, map[string]any{"items": items, "page": pg}, err)
 	}
+}
+
+// --- needs-info ---
+
+type answerResponse struct {
+	BatchID string                      `json:"batchId"`
+	Items   []catalogService.AnswerItem `json:"items"`
+}
+
+func HandleNeedsInfoSummary(w http.ResponseWriter, r *http.Request) {
+	items, err := service(r).NeedsInfoSummary(r.Context())
+	send(w, r, http.StatusOK, map[string]any{"items": items}, err)
+}
+
+func HandleNeedsInfoList(w http.ResponseWriter, r *http.Request) {
+	key := strings.TrimSpace(r.URL.Query().Get("key"))
+	if key == "" {
+		badRequest(w, r, "key is required")
+		return
+	}
+	def, max := listBounds(r)
+	pg, limit, ok := pageOf(r, def, max)
+	if !ok {
+		badRequest(w, r, "bad page or limit")
+		return
+	}
+	items, total, err := service(r).NeedsInfoList(r.Context(), key, pg, limit)
+	send(w, r, http.StatusOK, page[dto.NeedsInfoWarehouse]{Items: items, Page: pg, Limit: limit, Total: total}, err)
+}
+
+func HandleNeedsInfoAnswer(w http.ResponseWriter, r *http.Request) {
+	req, ok := body[catalogService.AnswerRequest](w, r)
+	if !ok {
+		return
+	}
+	batchID, items, err := service(r).AnswerNeedsInfo(r.Context(), actorOf(r), req)
+	send(w, r, http.StatusOK, answerResponse{BatchID: batchID, Items: items}, err)
 }

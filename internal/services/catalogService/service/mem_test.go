@@ -395,3 +395,43 @@ func (s *memStore) BumpCatalogVersion(context.Context) (int64, error) {
 }
 
 var _ store.Store = (*memStore)(nil)
+
+func (s *memStore) NeedsInfoCounts(context.Context) (map[string]int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string]int64{}
+	for _, w := range s.warehouses {
+		if w.Status != models.WarehouseLive {
+			continue
+		}
+		for _, k := range w.NeedsInfo {
+			out[k]++
+		}
+	}
+	return out, nil
+}
+
+func (s *memStore) NeedsInfoWarehouses(_ context.Context, key string, page, limit int) ([]models.Warehouse, int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []models.Warehouse
+	for _, w := range s.warehouses {
+		if w.Status == models.WarehouseLive && slices.Contains(w.NeedsInfo, key) {
+			out = append(out, roundTrip(w))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name+out[i].ID.Hex() < out[j].Name+out[j].ID.Hex() })
+	return paginate(out, page, limit), int64(len(out)), nil
+}
+
+func (s *memStore) RevisionStates(_ context.Context, ids []primitive.ObjectID) (map[primitive.ObjectID]models.RevisionState, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[primitive.ObjectID]models.RevisionState{}
+	for _, id := range ids {
+		if r, ok := s.revisions[id]; ok {
+			out[id] = r.State
+		}
+	}
+	return out, nil
+}

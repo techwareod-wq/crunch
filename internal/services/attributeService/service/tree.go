@@ -175,16 +175,44 @@ func (s *svc) CreateNode(ctx context.Context, actor domain.Actor, n models.Attri
 	if n, err = domain.ValidateNode(snap, n); err != nil {
 		return n, attributeService.WriteResult{}, attributeService.Invalid(err)
 	}
+	if err := s.checkKeyFree(ctx, n.Key, "node "+n.Key); err != nil {
+		return n, attributeService.WriteResult{}, err
+	}
 	n.ID = primitive.NilObjectID
 	n.Version = 1
 	s.stamp(&n, actor)
 	if err := s.store.InsertNode(ctx, &n); err != nil {
 		return n, attributeService.WriteResult{}, err
 	}
-	// The Unknown markers (D-128) land on live docs and open drafts; both
-	// collections arrive with the catalog (03) and are written from there.
-	s.record(ctx, actor, domain.EntityAttributeDef, n.Key, domain.ActionCreate, nil, n, map[string]any{"default": string(def)})
-	return n, s.afterWrite(ctx, []string{n.Key}), nil
+	meta := map[string]any{"default": string(def)}
+	var markErr error
+	if def == attributeService.DefaultUnknown {
+		meta["batchId"], meta["marked"], markErr = s.markUnknown(ctx, actor, n)
+	}
+	s.record(ctx, actor, domain.EntityAttributeDef, n.Key, domain.ActionCreate, nil, n, meta)
+	// The recompute runs after the markers so projections pick them up.
+	res := s.afterWrite(ctx, []string{n.Key})
+	if markErr != nil {
+		return n, res, fmt.Errorf("node %q created, but its unknown markers are incomplete: %w", n.Key, markErr)
+	}
+	return n, res, nil
+}
+
+// markUnknown writes the new node's {status: unknown} markers directly onto
+// live copies and open revisions whose parent is yes, without review
+// (D-128), and logs one change_log row per warehouse under one batchId.
+func (s *svc) markUnknown(ctx context.Context, actor domain.Actor, n models.AttributeNode) (string, int, error) {
+	batchID := primitive.NewObjectID().Hex()
+	ids, err := s.store.MarkNodeUnknown(context.WithoutCancel(ctx), n.Key, n.ParentKey, s.now().UTC())
+	for _, id := range ids {
+		s.record(ctx, actor, domain.EntityWarehouse, id.Hex(), domain.ActionUpdate, nil,
+			map[string]any{"attributes." + n.Key: models.NodeState{Status: domain.StatusUnknown}},
+			map[string]any{"op": "new_node_unknown", "node": n.Key, "batchId": batchID})
+	}
+	if len(ids) > 0 {
+		log.Info("attributes: unknown markers written", "node", n.Key, "warehouses", len(ids), "batch", batchID)
+	}
+	return batchID, len(ids), err
 }
 
 // UpdateNode applies p with an expectedVersion CAS.
@@ -300,6 +328,9 @@ func (s *svc) CreateField(ctx context.Context, actor domain.Actor, nodeKey strin
 	upd.Fields = append(upd.Fields, f)
 	if upd, err = domain.ValidateNode(snap, upd); err != nil {
 		return upd, attributeService.WriteResult{}, attributeService.Invalid(err)
+	}
+	if err := s.checkKeyFree(ctx, nodeKey+".fields."+f.Key, "field "+nodeKey+"."+f.Key); err != nil {
+		return upd, attributeService.WriteResult{}, err
 	}
 	meta := map[string]any{"op": "field_create", "field": f.Key}
 	if err := s.replaceNode(ctx, actor, old, &upd, domain.ActionUpdate, meta); err != nil {
