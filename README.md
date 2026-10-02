@@ -29,12 +29,9 @@ A feature is a **module** (`internal/modules`). It can add:
 - HTTP routes
 - a data cleaner for account deletion
 
-Copy `internal/modules/demo`, then add one line to `cmd/service/modules.go`. You don't need to edit any platform package.
+Write a module (embed `modules.Base`; `internal/modules/mail` is a small real example), then add one line to `cmd/service/modules.go`. You don't need to edit any platform package.
 
-The demo module is a working example you can delete:
-
-- **`POST /v1/admin/demo/dispatch`** (requires `cron.manage`) with `{"text": "..."}`: enqueues a `DEMO_SUMMARIZE` job, which asks the default LLM for a one-line summary and logs it.
-- **`demo_heartbeat` cron job**: does the same once a day. It is off until you set `cron.jobs.demo_heartbeat.enabled: true`.
+The WarehouseHub feature modules live in `internal/modules/{attributes,catalog,search,aisearch,enquiries,analytics}`; their shared types are in `internal/warehousehub/domain`.
 
 ## Run locally
 

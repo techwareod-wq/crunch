@@ -40,7 +40,7 @@ func TestEffectivePermissions(t *testing.T) {
 	}
 
 	// admin: the fixed bundle, and crucially NONE of the superuser-tier set.
-	admin := EffectivePermissions(&models.User{Role: models.RoleKeyAdmin}, cache, authzNow)
+	admin := EffectivePermissions(&models.User{Role: models.RoleKeyApprover}, cache, authzNow)
 	if !admin[PermAdminAccess] || !admin[PermRolesRead] || !admin[PermUsersRead] {
 		t.Error("admin must hold panel access + manage perms")
 	}
@@ -64,7 +64,7 @@ func TestEffectivePermissions(t *testing.T) {
 	if got := EffectivePermissions(nil, cache, authzNow); len(got) != 0 {
 		t.Errorf("nil user perms = %v, want none", got)
 	}
-	if Has(&models.User{Role: models.RoleKeyAdmin}, PermRolesRead, nil, authzNow) {
+	if Has(&models.User{Role: models.RoleKeyApprover}, PermRolesRead, nil, authzNow) {
 		t.Error("nil cache must resolve no role permissions (fail closed)")
 	}
 }
@@ -127,7 +127,7 @@ func TestRank(t *testing.T) {
 		want int
 	}{
 		{models.RoleKeySuperuser, 30},
-		{models.RoleKeyAdmin, 20},
+		{models.RoleKeyApprover, 20},
 		{"support", 10},
 		{models.RoleKeyUser, 0},
 		{"ghost", 0}, // unknown → 0, fail closed
@@ -141,7 +141,7 @@ func TestRank(t *testing.T) {
 	if got := Rank(nil, cache); got != 0 {
 		t.Errorf("Rank(nil) = %d, want 0", got)
 	}
-	if got := Rank(&models.User{Role: models.RoleKeyAdmin}, nil); got != 0 {
+	if got := Rank(&models.User{Role: models.RoleKeyApprover}, nil); got != 0 {
 		t.Errorf("Rank with nil cache = %d, want 0 (fail closed)", got)
 	}
 }

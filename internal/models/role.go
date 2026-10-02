@@ -12,15 +12,19 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-// Role key constants for the three seeded system roles. The strings are the
-// single source of truth for role identity: user docs store Role == one of
-// these keys (or a custom key created via the API). The permission *bundles*
-// live in the authz package (which references authz.Permission constants);
-// models only needs the keys for count queries and seed identity.
+// Role key constants for the seeded system roles. The strings are the single
+// source of truth for role identity: user docs store Role == one of these keys
+// (or a custom key created via the API). The permission *bundles* live in the
+// authz package (which references authz.Permission constants); models only
+// needs the keys for count queries and seed identity.
 const (
 	RoleKeyUser      = "user"
-	RoleKeyAdmin     = "admin"
+	RoleKeyEditor    = "editor"
+	RoleKeyApprover  = "approver"
 	RoleKeySuperuser = "superuser"
+	// RoleKeyLegacyAdmin is crunch's retired `admin` role (replaced by
+	// approver, D-013). Only RetireLegacyAdminRole references it.
+	RoleKeyLegacyAdmin = "admin"
 )
 
 // Role is one entry of the DB-curated role catalog (RBAC plan §2.1). Roles
@@ -349,6 +353,63 @@ func BackfillRoles(ctx context.Context, dryRun bool) (*RoleBackfillReport, error
 			return report, fmt.Errorf("backfill roles: %w", err)
 		}
 		report.Backfilled = res.ModifiedCount
+	}
+	return report, nil
+}
+
+// LegacyAdminRetireReport summarizes one RetireLegacyAdminRole run.
+type LegacyAdminRetireReport struct {
+	AdminUsers  int64 // active users still holding role=admin
+	Migrated    int64 // moved to approver (apply only)
+	RoleDocLeft bool  // the admin role doc exists (before this run)
+	RoleDeleted bool  // the admin role doc was deleted (apply only)
+}
+
+// RetireLegacyAdminRole moves every user holding crunch's retired `admin` role
+// to `approver` and then deletes the `admin` role doc (D-013). The approver
+// role must already be seeded — the caller runs -seed-roles first. Idempotent:
+// a second apply reports zero writes. Migration-only: it bypasses the
+// adminActions audit and the role_updated_at CAS, like the other seed helpers.
+// Deactivated users are migrated too so a tombstone never points at a
+// missing role.
+func RetireLegacyAdminRole(ctx context.Context, dryRun bool) (*LegacyAdminRetireReport, error) {
+	report := &LegacyAdminRetireReport{}
+	filter := bson.M{"role": RoleKeyLegacyAdmin}
+	count, err := Collection(usersCollection).CountDocuments(ctx, filter)
+	if err != nil {
+		return report, fmt.Errorf("count admin users: %w", err)
+	}
+	report.AdminUsers = count
+
+	found, _, err := FindRoleByKey(ctx, RoleKeyLegacyAdmin)
+	if err != nil {
+		return report, fmt.Errorf("lookup admin role: %w", err)
+	}
+	report.RoleDocLeft = found
+	if dryRun {
+		return report, nil
+	}
+
+	if found, _, err := FindRoleByKey(ctx, RoleKeyApprover); err != nil || !found {
+		if err == nil {
+			err = fmt.Errorf("approver role is not seeded — run -seed-roles first")
+		}
+		return report, err
+	}
+	if count > 0 {
+		now := time.Now().UTC()
+		res, err := Collection(usersCollection).UpdateMany(ctx, filter,
+			bson.M{"$set": bson.M{"role": RoleKeyApprover, "role_updated_at": now, fieldUpdatedAt: now}})
+		if err != nil {
+			return report, fmt.Errorf("migrate admin users: %w", err)
+		}
+		report.Migrated = res.ModifiedCount
+	}
+	if report.RoleDocLeft {
+		if err := DeleteRoleByKey(ctx, RoleKeyLegacyAdmin); err != nil {
+			return report, fmt.Errorf("delete admin role: %w", err)
+		}
+		report.RoleDeleted = true
 	}
 	return report, nil
 }

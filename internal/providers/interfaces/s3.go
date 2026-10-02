@@ -11,7 +11,11 @@ type S3 interface {
 	// Single-part uploads
 	UploadFile(ctx context.Context, key, localPath, bucket string) error
 	UploadFileUsingBytes(ctx context.Context, key, bucket string, data []byte) error
-	UploadFilePublicReadUsingBytes(ctx context.Context, key, bucket string, data []byte) error
+
+	// HeadObject returns an object's size and content type without reading
+	// it — used to enforce upload limits on confirm. found is false when the
+	// key does not exist.
+	HeadObject(ctx context.Context, bucket, key string) (info dto.S3ObjectInfo, found bool, err error)
 
 	// Download
 	DownloadFile(ctx context.Context, key, localPath, bucket string) error

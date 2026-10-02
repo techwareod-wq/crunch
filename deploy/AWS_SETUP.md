@@ -116,10 +116,45 @@
 | GitHub Actions role | `github-actions-crunch-ecr` (trust: `atharva-ng/crunch` main + integration) |
 | Instance role / profile | `crunch-server` |
 | EC2 boxes | new prod + integration (AL2023), deploy dir `/home/ec2-user/crunch-deploy/`, env `/etc/crunch/crunch.env` |
-| S3 buckets | `crunch-assets-dev`, `crunch-assets-prod`. CORS with `https://` origins |
+| S3 buckets | 2 per env (D-015), see "WarehouseHub media storage" below |
 | SQS | `crunch-primary`, `crunch-secondary`, `crunch-dlq`, per environment (set redrive to the DLQ) |
-| App IAM user | `crunch-app`, scoped to only the crunch bucket + queues |
-| Mongo | new Atlas clusters/DBs `crunch` (integration + prod). Local `.env` should point at a **local** Mongo |
+| App IAM user | `crunch-app`, scoped to only the crunch buckets + queues |
+| Mongo | new Atlas clusters, DB `crunchDB` (integration + prod). Local `.env` should point at a **local** Mongo |
 | GitHub vars/secrets | `AWS_REGION`, `EC2_INSTANCE_ID`, `EC2_INSTANCE_ID_INTEGRATION`, `AWS_ROLE_ARN` |
 
 **Open:** production API domain (for `server.allowedHosts` / `CORS_ALLOWED_ORIGINS`).
+
+---
+
+## WarehouseHub media storage (D-015, D-062)
+
+Two buckets per environment. **No ACLs anywhere**: Object Ownership = "Bucket owner enforced", Block Public Access = ON for both buckets.
+
+| | integration | production | Who reads it |
+|---|---|---|---|
+| Public media (photos, public docs) | `warehousehub-media-public-int` | `warehousehub-media-public-prod` | Anyone, **only through CloudFront** |
+| Private docs (agreement PDFs, staff-only docs) | `warehousehub-media-private-int` | `warehousehub-media-private-prod` | Staff, via 5-min presigned GET |
+
+### Env vars (in `/etc/crunch/crunch.env`)
+```
+AWS_S3_PUBLIC_BUCKET=warehousehub-media-public-<env>
+AWS_S3_PRIVATE_BUCKET=warehousehub-media-private-<env>
+PUBLIC_MEDIA_BASE_URL=https://<cloudfront-domain>      # no trailing slash
+```
+Link lifetimes live in values: `storage.privateLinkSeconds` (300), `storage.uploadLinkSeconds` (900).
+
+### CloudFront (one distribution per env, public bucket only)
+1. Origin = the public bucket's REST endpoint, with **Origin Access Control** (OAC, sign requests).
+2. Paste the bucket policy CloudFront generates into the public bucket (allows `s3:GetObject` for `cloudfront.amazonaws.com` with `AWS:SourceArn` = the distribution ARN). Nothing else gets read access.
+3. Cache policy `CachingOptimized`; viewer protocol = redirect to HTTPS.
+4. Alternate domain (e.g. `media.<domain>`) + ACM cert in us-east-1: **blocked on D-005**. Until then use the `*.cloudfront.net` domain.
+
+### CORS (both buckets — browsers PUT straight to S3 with presigned URLs)
+- Methods PUT/GET/HEAD, headers `*`, expose `ETag`, max-age 3000.
+- AllowedOrigins = the **admin panel** origin(s), **with `https://`** (S3 matches the Origin header exactly; see the 2026-07-12 incident above). Integration may use `*`.
+
+### IAM (`crunch-app` user)
+`s3:PutObject`, `s3:GetObject`, `s3:DeleteObject`, `s3:ListBucket` on both buckets (HeadObject is covered by GetObject). **Do not** grant `s3:PutObjectAcl`.
+
+### Atlas Vector Search index (placeholder, AI-08)
+Created by hand in Atlas on the `warehouses` collection once AI search lands. The index JSON will live in `deploy/ATLAS_INDEXES.md` (task AI-08).

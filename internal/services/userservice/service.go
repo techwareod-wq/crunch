@@ -10,6 +10,9 @@ import (
 
 type UserService interface {
 	GetProfile(ctx context.Context, userID string) (*dto.UserResponse, error)
+	// UpdateProfile validates and stores the visitor's phone + company
+	// (D-100) and returns the updated profile.
+	UpdateProfile(ctx context.Context, userID string, req dto.UpdateProfileRequest) (*dto.UserResponse, error)
 	SyncUser(ctx context.Context, req dto.SyncUserRequest) error
 	// DeleteUser soft-deletes the user and returns their ID so the caller can
 	// tear down what hangs off the account. Returns

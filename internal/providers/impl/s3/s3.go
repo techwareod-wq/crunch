@@ -3,6 +3,7 @@ package s3provider
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -78,17 +79,25 @@ func (p *s3Provider) UploadFileUsingBytes(ctx context.Context, key, bucket strin
 	return err
 }
 
-func (p *s3Provider) UploadFilePublicReadUsingBytes(ctx context.Context, key, bucket string, data []byte) error {
-	contentType := http.DetectContentType(data)
-
-	_, err := p.client.PutObject(ctx, &s3.PutObjectInput{
-		Bucket:      &bucket,
-		Key:         &key,
-		Body:        bytes.NewReader(data),
-		ContentType: &contentType,
-		ACL:         types.ObjectCannedACLPublicRead,
-	})
-	return err
+// HeadObject reports an object's size and content type. A missing key is
+// (found=false, nil), not an error.
+func (p *s3Provider) HeadObject(ctx context.Context, bucket, key string) (dto.S3ObjectInfo, bool, error) {
+	out, err := p.client.HeadObject(ctx, &s3.HeadObjectInput{Bucket: &bucket, Key: &key})
+	if err != nil {
+		var notFound *types.NotFound
+		if errors.As(err, &notFound) {
+			return dto.S3ObjectInfo{}, false, nil
+		}
+		return dto.S3ObjectInfo{}, false, err
+	}
+	info := dto.S3ObjectInfo{}
+	if out.ContentLength != nil {
+		info.Size = *out.ContentLength
+	}
+	if out.ContentType != nil {
+		info.ContentType = *out.ContentType
+	}
+	return info, true, nil
 }
 
 func (p *s3Provider) abortMultipart(ctx context.Context, bucket, key string, uploadID *string) {

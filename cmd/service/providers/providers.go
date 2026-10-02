@@ -22,10 +22,12 @@ import (
 	accountsvc "github.com/atharva-ng/crunch/internal/services/accountService/service"
 	accountstore "github.com/atharva-ng/crunch/internal/services/accountService/store"
 	asynchandler "github.com/atharva-ng/crunch/internal/services/asyncHandler"
+	"github.com/atharva-ng/crunch/internal/services/staffinvites"
 	usersvc "github.com/atharva-ng/crunch/internal/services/userservice/service"
 	userstore "github.com/atharva-ng/crunch/internal/services/userservice/store"
 	"github.com/atharva-ng/crunch/internal/tokentracker"
 	"github.com/atharva-ng/crunch/internal/util/log"
+	"github.com/atharva-ng/crunch/internal/warehousehub/changelog"
 )
 
 // InjectDefaultProviders wires the infrastructure providers: S3, the token
@@ -138,11 +140,15 @@ func InjectDefaultServices(appCtx *config.AppContext, mods []modules.Module) err
 	appCtx.RolesCache = rolesCache
 	log.Info("Injected roles cache")
 
+	appCtx.InternalServices.ClerkAccounts = clerkaccounts.GetProvider()
 	appCtx.InternalServices.AccountService = accountsvc.NewService(
 		accountstore.NewStore(),
-		clerkaccounts.GetProvider(),
+		appCtx.InternalServices.ClerkAccounts,
 		modules.DataCleaners(mods),
 	)
+
+	inviteExpiry := time.Duration(appCtx.Config.Values.Admin.StaffInviteExpiryDays) * 24 * time.Hour
+	appCtx.InternalServices.StaffInvites = staffinvites.New(changelog.New(), inviteExpiry)
 
 	return nil
 }

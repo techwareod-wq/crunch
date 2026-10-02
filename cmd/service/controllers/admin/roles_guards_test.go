@@ -154,8 +154,8 @@ func TestHandleAdminSetUserRole_Guards(t *testing.T) {
 		superCount int64  // countActiveSuperusers result
 		wantCode   int
 	}{
-		{"rank climb: assign peer rank", authz.DefaultRoles(), models.RoleKeyAdmin, models.RoleKeyUser, models.RoleKeyAdmin, 0, apperrors.ErrRoleEscalation.Code},
-		{"rank climb: assign superior", authz.DefaultRoles(), models.RoleKeyAdmin, models.RoleKeyUser, models.RoleKeySuperuser, 0, apperrors.ErrRoleEscalation.Code},
+		{"rank climb: assign peer rank", authz.DefaultRoles(), models.RoleKeyApprover, models.RoleKeyUser, models.RoleKeyApprover, 0, apperrors.ErrRoleEscalation.Code},
+		{"rank climb: assign superior", authz.DefaultRoles(), models.RoleKeyApprover, models.RoleKeyUser, models.RoleKeySuperuser, 0, apperrors.ErrRoleEscalation.Code},
 		{"perm not held by caller", customCatalog, "lead", models.RoleKeyUser, "ops", 0, apperrors.ErrRoleEscalation.Code},
 		{"demote last superuser", authz.DefaultRoles(), models.RoleKeySuperuser, models.RoleKeySuperuser, models.RoleKeyUser, 1, apperrors.ErrLastSuperuser.Code},
 		{"demote superuser with backup", authz.DefaultRoles(), models.RoleKeySuperuser, models.RoleKeySuperuser, models.RoleKeyUser, 2, http.StatusOK},
@@ -210,7 +210,7 @@ func TestHandleAdminUpsertRole_Guards(t *testing.T) {
 			existing: nil, wantCode: apperrors.ErrRoleEscalation.Code,
 		},
 		{
-			name: "new rank >= caller rank", catalog: authz.DefaultRoles(), callerRole: models.RoleKeyAdmin,
+			name: "new rank >= caller rank", catalog: authz.DefaultRoles(), callerRole: models.RoleKeyApprover,
 			req:      adminUpsertRoleRequest{Key: "newrole", Rank: 25, Permissions: []string{string(authz.PermRolesRead)}},
 			existing: nil, wantCode: apperrors.ErrRoleEscalation.Code,
 		},
@@ -299,7 +299,7 @@ func TestHandleAdminUpsertRole_ImmutableDescriptionEditable(t *testing.T) {
 		})
 		appCtx := guardAppCtx(t, authz.DefaultRoles())
 		req := adminUpsertRoleRequest{Key: models.RoleKeySuperuser, Rank: authz.RankSuperuser, Permissions: []string{authz.Wildcard}, Description: "sneaky"}
-		rec := serveGuard(appCtx, handleAdminUpsertRole, bodyReq(callerUser(models.RoleKeyAdmin), req))
+		rec := serveGuard(appCtx, handleAdminUpsertRole, bodyReq(callerUser(models.RoleKeyApprover), req))
 		wantStatus(t, rec, apperrors.ErrRoleEscalation.Code)
 	})
 
@@ -320,7 +320,7 @@ func TestHandleAdminDeleteRole_Guards(t *testing.T) {
 		holders  int64
 		wantCode int
 	}{
-		{"system role undeletable", &models.Role{Key: models.RoleKeyAdmin, System: true}, 0, apperrors.ErrImmutableRole.Code},
+		{"system role undeletable", &models.Role{Key: models.RoleKeyApprover, System: true}, 0, apperrors.ErrImmutableRole.Code},
 		{"role in use", &models.Role{Key: "custom", System: false}, 3, apperrors.ErrRoleInUse.Code},
 		{"unused custom role deleted", &models.Role{Key: "custom", System: false}, 0, http.StatusOK},
 		{"unknown role", nil, 0, apperrors.ErrRoleNotFound.Code},

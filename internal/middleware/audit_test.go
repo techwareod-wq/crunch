@@ -62,7 +62,7 @@ func TestAudit_MutatingRequestByAdminIsRecorded(t *testing.T) {
 
 	r := httptest.NewRequest(http.MethodPost, "/test/audit-mutation", nil)
 	r.Header.Set(adminActionHeader, "demo.dispatch")
-	ctx := context.WithValue(r.Context(), UserContextKey, &models.User{Role: models.RoleKeyAdmin, Email: "admin@x.com"})
+	ctx := context.WithValue(r.Context(), UserContextKey, &models.User{Role: models.RoleKeyApprover, Email: "admin@x.com"})
 	ctx = context.WithValue(ctx, DeserializerContextKey, body)
 	rec := httptest.NewRecorder()
 	routes["/test/audit-mutation"].ServeHTTP(rec, r.WithContext(ctx))
@@ -98,7 +98,7 @@ func TestAudit_AdminGetIsNotRecorded(t *testing.T) {
 	h := buildAdminRoute(t, "/test/audit-get-skip")
 
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, requestWithRoleUser(models.RoleKeyAdmin, "admin@x.com"))
+	h.ServeHTTP(rec, requestWithRoleUser(models.RoleKeyApprover, "admin@x.com"))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
@@ -145,7 +145,7 @@ func TestAudit_SelfDecodedBodyIsCapturedWhenHandlerReadsIt(t *testing.T) {
 	})).WithAdminAuthorization()
 
 	r := httptest.NewRequest(http.MethodPatch, "/test/audit-selfdecode", strings.NewReader(raw))
-	ctx := context.WithValue(r.Context(), UserContextKey, &models.User{Role: models.RoleKeyAdmin, Email: "admin@x.com"})
+	ctx := context.WithValue(r.Context(), UserContextKey, &models.User{Role: models.RoleKeyApprover, Email: "admin@x.com"})
 	rec := httptest.NewRecorder()
 	routes["/test/audit-selfdecode"].ServeHTTP(rec, r.WithContext(ctx))
 
@@ -170,7 +170,7 @@ func TestAudit_QueryTargetIsRecordedOnDelete(t *testing.T) {
 	})).WithAdminAuthorization()
 
 	r := httptest.NewRequest(http.MethodDelete, "/test/audit-query-target?userId=1234567890abcdef12345678&scheduledArticleId=s1", nil)
-	ctx := context.WithValue(r.Context(), UserContextKey, &models.User{Role: models.RoleKeyAdmin, Email: "admin@x.com"})
+	ctx := context.WithValue(r.Context(), UserContextKey, &models.User{Role: models.RoleKeyApprover, Email: "admin@x.com"})
 	rec := httptest.NewRecorder()
 	routes["/test/audit-query-target"].ServeHTTP(rec, r.WithContext(ctx))
 
@@ -191,7 +191,7 @@ func TestAudit_PanickingHandlerIsRecordedAs500AndRepanics(t *testing.T) {
 	})).WithAdminAuthorization()
 
 	r := httptest.NewRequest(http.MethodPost, "/test/audit-panic", nil)
-	ctx := context.WithValue(r.Context(), UserContextKey, &models.User{Role: models.RoleKeyAdmin, Email: "admin@x.com"})
+	ctx := context.WithValue(r.Context(), UserContextKey, &models.User{Role: models.RoleKeyApprover, Email: "admin@x.com"})
 
 	func() {
 		defer func() {

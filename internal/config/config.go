@@ -57,7 +57,16 @@ type AWSConfig struct {
 	Region          string
 	AccessKeyID     string
 	SecretAccessKey string
-	S3Bucket        string
+	// PublicBucket holds public media (listing photos, public docs). It is
+	// readable only through CloudFront (OAC bucket policy) — never via ACLs
+	// (D-015).
+	PublicBucket string
+	// PrivateBucket holds staff-only docs; served by short-lived presigned
+	// GETs only. No public access.
+	PrivateBucket string
+	// PublicMediaBaseURL is the CloudFront origin in front of PublicBucket,
+	// e.g. "https://media.example.com". Public media URLs = base + "/" + key.
+	PublicMediaBaseURL string
 }
 
 type LLMConfig struct {
@@ -195,7 +204,9 @@ func (c *AppConfig) LoadAWSConfig() {
 	}
 	c.AWS.AccessKeyID = os.Getenv("AWS_ACCESS_KEY_ID")
 	c.AWS.SecretAccessKey = os.Getenv("AWS_SECRET_ACCESS_KEY")
-	c.AWS.S3Bucket = os.Getenv("AWS_S3_BUCKET")
+	c.AWS.PublicBucket = os.Getenv("AWS_S3_PUBLIC_BUCKET")
+	c.AWS.PrivateBucket = os.Getenv("AWS_S3_PRIVATE_BUCKET")
+	c.AWS.PublicMediaBaseURL = strings.TrimRight(os.Getenv("PUBLIC_MEDIA_BASE_URL"), "/")
 }
 
 func (c *EnvConfig) IsProd() bool {

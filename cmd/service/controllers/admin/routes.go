@@ -17,7 +17,7 @@ import (
 // Every route is tagged with its domain permission (RBAC plan §3/§5) — the
 // baseline admin.access is always required, plus each tagged permission. This
 // is what makes future custom (e.g. support-tier) roles enforceable. Only
-// whoami and the audit list are argless (baseline only). Shared multi-verb
+// whoami is argless (baseline only). Shared multi-verb
 // paths (roles) are tagged with the READ permission and re-check the
 // WRITE permission in-handler (the registry is path-only).
 //
@@ -35,7 +35,25 @@ func Handle(appCtx *config.AppContext) {
 		WithLogEnabled()
 
 	middleware.Handle("/v1/admin/audit", http.HandlerFunc(HandleAdminListAuditActions)).
-		WithAdminAuthorization().
+		WithAdminAuthorization(authz.PermAuditRead).
+		WithJWTAuthentication().
+		WithMethods("GET").
+		With(appCtx.Middleware()).
+		AllowCORS().
+		WithLogEnabled()
+
+	// --- WarehouseHub change log (D-014): full before/after docs ---
+
+	middleware.Handle("/v1/admin/changes", http.HandlerFunc(HandleAdminListChanges)).
+		WithAdminAuthorization(authz.PermAuditRead).
+		WithJWTAuthentication().
+		WithMethods("GET").
+		With(appCtx.Middleware()).
+		AllowCORS().
+		WithLogEnabled()
+
+	middleware.Handle("/v1/admin/changes/detail", http.HandlerFunc(HandleAdminChangeDetail)).
+		WithAdminAuthorization(authz.PermAuditRead).
 		WithJWTAuthentication().
 		WithMethods("GET").
 		With(appCtx.Middleware()).
@@ -69,6 +87,34 @@ func Handle(appCtx *config.AppContext) {
 		WithAdminAuthorization(authz.PermRolesWrite).
 		WithJWTAuthentication().
 		With(middleware.DeserializeJsonOptional[adminSeedRolesRequest]()).
+		WithMethods("POST").
+		With(appCtx.Middleware()).
+		AllowCORS().
+		WithLogEnabled()
+
+	// --- staff invites (D-011): superuser only ---
+
+	middleware.Handle("/v1/admin/staff/invite", http.HandlerFunc(HandleAdminStaffInvite)).
+		WithAdminAuthorization(authz.PermStaffInvite).
+		WithJWTAuthentication().
+		With(middleware.DeserializeJson[adminStaffInviteRequest]()).
+		WithMethods("POST").
+		With(appCtx.Middleware()).
+		AllowCORS().
+		WithLogEnabled()
+
+	middleware.Handle("/v1/admin/staff/invites", http.HandlerFunc(HandleAdminListStaffInvites)).
+		WithAdminAuthorization(authz.PermStaffInvite).
+		WithJWTAuthentication().
+		WithMethods("GET").
+		With(appCtx.Middleware()).
+		AllowCORS().
+		WithLogEnabled()
+
+	middleware.Handle("/v1/admin/staff/invites/revoke", http.HandlerFunc(HandleAdminRevokeStaffInvite)).
+		WithAdminAuthorization(authz.PermStaffInvite).
+		WithJWTAuthentication().
+		With(middleware.DeserializeJson[adminRevokeStaffInviteRequest]()).
 		WithMethods("POST").
 		With(appCtx.Middleware()).
 		AllowCORS().

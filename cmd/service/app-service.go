@@ -15,6 +15,7 @@ import (
 	"github.com/atharva-ng/crunch/cmd/service/providers"
 	"github.com/atharva-ng/crunch/internal/config"
 	"github.com/atharva-ng/crunch/internal/middleware"
+	"github.com/atharva-ng/crunch/internal/models"
 	"github.com/atharva-ng/crunch/internal/modules"
 	"github.com/atharva-ng/crunch/internal/util/log"
 )
@@ -39,6 +40,14 @@ func main() {
 	// Role catalog for the admin authorization gate (boot-loaded by the
 	// providers).
 	middleware.SetRolesCache(appCtx.RolesCache)
+
+	// Staff invites (D-011): a JWT-auto-created user picks up a pending
+	// invite's role on first sign-in (the Clerk webhook is the other path).
+	middleware.SetUserCreatedHook(func(ctx context.Context, u *models.User) {
+		if err := appCtx.InternalServices.StaffInvites.Apply(ctx, u, "jwt"); err != nil {
+			log.Error("staff invite apply on JWT auto-create failed — the webhook path will retry", "user_id", u.ID.Hex(), "error", err)
+		}
+	})
 
 	loadAppAPIs(appCtx, mods)
 

@@ -56,6 +56,14 @@ type User struct {
 	// DeactivateAndScrubUserByID rewrites the email/name, and filtered on by
 	// re-runs so the deletion suffix is never appended to the email twice.
 	ScrubbedAt *time.Time `bson:"scrubbed_at,omitempty" json:"-"`
+
+	// Visitor profile (D-100), set via POST /v1/me/profile and prefilled on the
+	// enquiry form. Phone is what the visitor typed; PhoneE164 is the
+	// normalised form. Format-checked only — no OTP.
+	Phone            string     `bson:"phone,omitempty"              json:"phone,omitempty"`
+	PhoneE164        string     `bson:"phone_e164,omitempty"         json:"phoneE164,omitempty"`
+	Company          string     `bson:"company,omitempty"            json:"company,omitempty"`
+	ProfileUpdatedAt *time.Time `bson:"profile_updated_at,omitempty" json:"profileUpdatedAt,omitempty"`
 }
 
 type OverrideEntry struct {
@@ -319,6 +327,10 @@ func DeactivateUserByClerkID(ctx context.Context, clerkID string) error {
 //     signups no longer collide with it), and the name is blanked. Filtered on
 //     scrubbed_at being unset, so re-runs are zero-match no-ops and the suffix
 //     is never appended twice.
+//
+// phone, phone_e164 and company are deliberately KEPT (soft delete, D-019):
+// the visitor's contact details survive account deletion, like their
+// enquiries.
 //
 // clerk_id is deliberately KEPT: the SyncUser anti-resurrection guard keys on
 // it, and the Clerk user is deleted upstream so the id can never return.

@@ -18,8 +18,8 @@ func newTestRolesCache(t *testing.T, roles []models.Role) *RolesCache {
 func TestRolesCacheByKey(t *testing.T) {
 	c := newTestRolesCache(t, DefaultRoles())
 
-	if r, ok := c.ByKey(models.RoleKeyAdmin); !ok || r.Rank != RankAdmin {
-		t.Errorf("ByKey(admin) = %v, %v; want admin rank %d", r, ok, RankAdmin)
+	if r, ok := c.ByKey(models.RoleKeyApprover); !ok || r.Rank != RankApprover {
+		t.Errorf("ByKey(admin) = %v, %v; want admin rank %d", r, ok, RankApprover)
 	}
 	if _, ok := c.ByKey("ghost"); ok {
 		t.Error("unknown key must not resolve")
@@ -27,7 +27,7 @@ func TestRolesCacheByKey(t *testing.T) {
 
 	// Nil receiver tolerance (cache not wired in tests).
 	var nilCache *RolesCache
-	if _, ok := nilCache.ByKey(models.RoleKeyAdmin); ok {
+	if _, ok := nilCache.ByKey(models.RoleKeyApprover); ok {
 		t.Error("nil cache must resolve nothing")
 	}
 	if got := nilCache.Keys(); got != nil {
@@ -49,13 +49,13 @@ func TestRolesCacheEmptyCatalogOK(t *testing.T) {
 func TestRolesCacheDuplicateKeyRejectedKeepsSnapshot(t *testing.T) {
 	c := newTestRolesCache(t, DefaultRoles())
 
-	dup := append(DefaultRoles(), models.Role{Key: models.RoleKeyAdmin, Rank: 99, Permissions: []string{Wildcard}})
+	dup := append(DefaultRoles(), models.Role{Key: models.RoleKeyApprover, Rank: 99, Permissions: []string{Wildcard}})
 	if err := c.install(dup); err == nil {
 		t.Fatal("duplicate role key must reject the reload")
 	}
 	// Previous snapshot keeps serving — admin still resolves at its old rank.
-	if r, ok := c.ByKey(models.RoleKeyAdmin); !ok || r.Rank != RankAdmin {
-		t.Errorf("after rejected reload, admin rank = %v (ok=%v); want %d from old snapshot", r, ok, RankAdmin)
+	if r, ok := c.ByKey(models.RoleKeyApprover); !ok || r.Rank != RankApprover {
+		t.Errorf("after rejected reload, admin rank = %v (ok=%v); want %d from old snapshot", r, ok, RankApprover)
 	}
 }
 

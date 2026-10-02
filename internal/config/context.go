@@ -9,6 +9,7 @@ import (
 	"github.com/atharva-ng/crunch/internal/tokentracker"
 
 	"github.com/atharva-ng/crunch/internal/services/accountService"
+	"github.com/atharva-ng/crunch/internal/services/staffinvites"
 	"github.com/atharva-ng/crunch/internal/services/userservice"
 )
 
@@ -60,6 +61,11 @@ type InternalServices struct {
 	// Mailer sends transactional email; Enabled() is false with no SMTP_HOST.
 	Mailer     interfaces.Mailer
 	Dispatcher interfaces.Dispatcher
+	// ClerkAccounts is the outbound Clerk Backend API (deletes, invitations).
+	ClerkAccounts interfaces.ClerkAccounts
+	// StaffInvites applies a pending staff invite's role on first sign-in
+	// (D-011).
+	StaffInvites *staffinvites.Service
 }
 
 type AppContext struct {

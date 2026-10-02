@@ -23,9 +23,23 @@ type Values struct {
 	Idempotency IdempotencyValues `yaml:"idempotency"`
 	Webhooks    WebhookValues     `yaml:"webhooks"`
 	S3          S3Values          `yaml:"s3"`
+	Storage     StorageValues     `yaml:"storage"`
 	LLM         LLMValues         `yaml:"llm"`
 	APIs        APIValues         `yaml:"apis"`
 	Cron        CronValues        `yaml:"cron"`
+	// WarehouseHub holds the WarehouseHub feature modules' tunables. Each
+	// module owns one sub-block.
+	WarehouseHub WarehouseHubValues `yaml:"warehousehub"`
+}
+
+// WarehouseHubValues is the values `warehousehub:` block. Module sub-blocks
+// are added here as each module lands.
+type WarehouseHubValues struct {
+	// PublicBaseURL is the public site origin (listing links, JSON-LD,
+	// sitemap). Empty until D-005 (domain) is resolved.
+	PublicBaseURL string `yaml:"publicBaseURL"`
+	// AdminBaseURL is the admin panel origin (links in staff emails).
+	AdminBaseURL string `yaml:"adminBaseURL"`
 }
 
 // CronValues configures the cron/time-trigger layer (internal/cron). Schedule
@@ -87,6 +101,9 @@ type AdminValues struct {
 	CacheRefreshSeconds int `yaml:"cacheRefreshSeconds"`
 	// Pagination bounds the admin list endpoints' page sizes.
 	Pagination AdminPaginationValues `yaml:"pagination"`
+	// StaffInviteExpiryDays is how long a staff invite stays usable (D-011);
+	// also sent to Clerk as the invitation lifetime.
+	StaffInviteExpiryDays int `yaml:"staffInviteExpiryDays"`
 }
 
 // AdminPaginationValues holds the default and maximum page sizes for the admin
@@ -131,6 +148,16 @@ type S3Values struct {
 	PresignPutExpirySeconds       int `yaml:"presignPutExpirySeconds"`
 	PresignMultipartExpirySeconds int `yaml:"presignMultipartExpirySeconds"`
 	MaxConcurrency                int `yaml:"maxConcurrency"`
+}
+
+// StorageValues holds the media link lifetimes (D-015, D-062).
+type StorageValues struct {
+	// PrivateLinkSeconds is the presigned GET lifetime for staff-only docs
+	// in the private bucket (5 min).
+	PrivateLinkSeconds int `yaml:"privateLinkSeconds"`
+	// UploadLinkSeconds is the presigned PUT lifetime for media uploads
+	// (15 min).
+	UploadLinkSeconds int `yaml:"uploadLinkSeconds"`
 }
 
 type LLMValues struct {

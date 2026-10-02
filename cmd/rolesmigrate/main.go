@@ -22,10 +22,11 @@
 // uses (a .env file is loaded if present).
 //
 //	go run ./cmd/rolesmigrate -seed-roles              # dry run: what roles would be seeded
-//	go run ./cmd/rolesmigrate -seed-roles -apply       # write the 3 system roles
+//	go run ./cmd/rolesmigrate -seed-roles -apply       # write the system roles
 //	go run ./cmd/rolesmigrate -seed-admins -emails a@b.com,c@d.com -apply   # promote to superusers
 //	go run ./cmd/rolesmigrate -backfill -apply         # default legacy null roles to "user"
 //	go run ./cmd/rolesmigrate -clear-grants -email a@b.com -apply   # wipe a user's overrides (lockout recovery)
+//	go run ./cmd/rolesmigrate -seed-roles -retire-admin -apply   # move legacy admin users to approver, drop the admin role (D-013)
 //	go run ./cmd/rolesmigrate -seed-roles -seed-admins -emails a@b.com -backfill -apply -v   # everything, verbose
 package main
 
@@ -46,7 +47,8 @@ import (
 func main() {
 	apply := flag.Bool("apply", false, "write the changes (default is a dry run)")
 	verbose := flag.Bool("v", false, "list every affected doc (not just the summary)")
-	seedRoles := flag.Bool("seed-roles", false, "idempotently upsert the 3 system roles (user/admin/superuser)")
+	seedRoles := flag.Bool("seed-roles", false, "idempotently upsert the system roles (user/editor/approver/superuser)")
+	retireAdmin := flag.Bool("retire-admin", false, "move users holding the legacy admin role to approver, then delete the admin role (run after -seed-roles)")
 	seedAdmins := flag.Bool("seed-admins", false, "promote the -emails list to role=superuser")
 	backfill := flag.Bool("backfill", false, "default any user with an empty role to \"user\"")
 	clearGrants := flag.Bool("clear-grants", false, "wipe extra_grants/extra_revokes for -email (lockout recovery)")
@@ -54,8 +56,8 @@ func main() {
 	emails := flag.String("emails", "", "CSV of emails for -seed-admins")
 	flag.Parse()
 
-	if !*seedRoles && !*seedAdmins && !*backfill && !*clearGrants {
-		fail("specify at least one action: -seed-roles, -seed-admins, -backfill, and/or -clear-grants")
+	if !*seedRoles && !*retireAdmin && !*seedAdmins && !*backfill && !*clearGrants {
+		fail("specify at least one action: -seed-roles, -retire-admin, -seed-admins, -backfill, and/or -clear-grants")
 	}
 	if *clearGrants && *email == "" {
 		fail("-clear-grants requires -email <address>")
@@ -94,6 +96,9 @@ func main() {
 	if *seedRoles {
 		pending = runSeedRoles(ctx, dryRun) || pending
 	}
+	if *retireAdmin {
+		pending = runRetireAdmin(ctx, dryRun) || pending
+	}
 	if *seedAdmins {
 		pending = runSeedAdmins(ctx, adminEmails, dryRun, *verbose) || pending
 	}
@@ -109,7 +114,7 @@ func main() {
 	}
 }
 
-// runSeedRoles upserts the 3 system roles. Returns whether writes are pending.
+// runSeedRoles upserts the system roles. Returns whether writes are pending.
 func runSeedRoles(ctx context.Context, dryRun bool) bool {
 	report, err := models.SeedRoles(ctx, authz.DefaultRoles(), dryRun)
 	if err != nil {
@@ -117,6 +122,18 @@ func runSeedRoles(ctx context.Context, dryRun bool) bool {
 	}
 	fmt.Printf("roles: created=%d updated=%d unchanged=%d\n", report.Created, report.Updated, report.Unchanged)
 	return report.Created > 0 || report.Updated > 0
+}
+
+// runRetireAdmin moves legacy admin users to approver and drops the admin role
+// doc. Returns whether writes are pending.
+func runRetireAdmin(ctx context.Context, dryRun bool) bool {
+	report, err := models.RetireLegacyAdminRole(ctx, dryRun)
+	if err != nil {
+		fail("retire admin: %v", err)
+	}
+	fmt.Printf("retire-admin: admin_users=%d migrated=%d role_doc=%t deleted=%t\n",
+		report.AdminUsers, report.Migrated, report.RoleDocLeft, report.RoleDeleted)
+	return report.AdminUsers > 0 || report.RoleDocLeft
 }
 
 // runSeedAdmins promotes the -emails list to superusers. Returns whether

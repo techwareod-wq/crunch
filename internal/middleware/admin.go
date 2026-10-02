@@ -17,7 +17,7 @@ import (
 // requirements compose in one place:
 //
 //	.WithAdminAuthorization(authz.PermContentManage)   // admin.access + content.manage
-//	.WithAdminAuthorization()                          // admin.access only (whoami, audit)
+//	.WithAdminAuthorization()                          // admin.access only (whoami)
 //	.WithAdminAuthorization(authz.PermRolesWrite)      // superuser-tier route
 //
 // It doubles as the persisted-audit chokepoint (see audit.go): every mutating

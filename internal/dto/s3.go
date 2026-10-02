@@ -5,6 +5,12 @@ import (
 	"time"
 )
 
+// S3ObjectInfo is the HeadObject result.
+type S3ObjectInfo struct {
+	Size        int64
+	ContentType string
+}
+
 // --- Presigned single-part PUT ---
 
 type PresignedSinglepartPutRequest struct {

@@ -27,6 +27,9 @@ var (
 	ErrInvalidPatchOp     = newError(http.StatusBadRequest, "invalid patch operation")
 	ErrEmptyRequestBody   = newError(http.StatusBadRequest, "request body is empty")
 	ErrNilRequestBody     = newError(http.StatusBadRequest, "request body is nil")
+	// ErrInvalidPhone rejects a phone number that isn't a valid number
+	// (D-100: format check only, default region IN).
+	ErrInvalidPhone = &Error{Code: http.StatusBadRequest, Message: "invalid phone number", ErrCode: "invalid_phone"}
 )
 
 // 413 Payload Too Large
@@ -44,6 +47,8 @@ var (
 // 404 Not Found
 var (
 	ErrUserNotFound = newError(http.StatusNotFound, "user not found")
+	// ErrNotFound is the generic 404 for a lookup by id that matched nothing.
+	ErrNotFound = newError(http.StatusNotFound, "not found")
 )
 
 // 403 Forbidden
@@ -96,6 +101,14 @@ var (
 	// ErrSuperuserUndeletable (403): superuser accounts cannot be deleted —
 	// demote the role first, where the last-superuser guard already applies.
 	ErrSuperuserUndeletable = newError(http.StatusForbidden, "superusers cannot be deleted — demote the role first")
+
+	// Staff invites (D-011).
+	ErrInvalidInvite    = newError(http.StatusBadRequest, "invite needs a valid email and role editor or approver")
+	ErrInvitePending    = newError(http.StatusConflict, "a pending invite already exists for this email")
+	ErrStaffUserExists  = newError(http.StatusConflict, "this email already has an account — set its role from the users page")
+	ErrInviteNotPending = newError(http.StatusConflict, "invite is no longer pending")
+	// ErrUpstreamUnavailable (502): a third-party API call (e.g. Clerk) failed.
+	ErrUpstreamUnavailable = newError(http.StatusBadGateway, "upstream service failed — try again")
 )
 
 // 500 Internal Server Error

@@ -19,6 +19,20 @@ const (
 	PermRolesWrite    Permission = "roles.write"    // superuser: edit catalog + assign roles
 	PermCronManage    Permission = "cron.manage"    // force-run cron jobs
 	PermMigrationsRun Permission = "migrations.run" // superuser: run data migrations from the panel
+	PermAuditRead     Permission = "audit.read"     // read the admin audit trail + change log
+
+	// WarehouseHub domains (D-012/D-013).
+	PermWarehousesRead    Permission = "warehouses.read"    // list/view listings, revisions, media
+	PermWarehousesEdit    Permission = "warehouses.edit"    // create/edit drafts, submit, withdraw
+	PermWarehousesApprove Permission = "warehouses.approve" // approve/reject revisions
+	PermWarehousesArchive Permission = "warehouses.archive" // archive/restore listings
+	PermAttributesManage  Permission = "attributes.manage"  // edit the attribute tree
+	PermIndustriesManage  Permission = "industries.manage"  // edit industry rules
+	PermAnswersWrite      Permission = "answers.write"      // bulk needs-info answers
+	PermEnquiriesRead     Permission = "enquiries.read"     // read the enquiry inbox
+	PermEnquiriesWrite    Permission = "enquiries.write"    // status/assign/notes on enquiries
+	PermAnalyticsRead     Permission = "analytics.read"     // search analytics dashboards
+	PermStaffInvite       Permission = "staff.invite"       // superuser: invite staff (D-012)
 )
 
 // Wildcard grants every permission (superuser). It is legal ONLY in
@@ -36,6 +50,18 @@ var AllPermissions = []Permission{
 	PermRolesWrite,
 	PermCronManage,
 	PermMigrationsRun,
+	PermAuditRead,
+	PermWarehousesRead,
+	PermWarehousesEdit,
+	PermWarehousesApprove,
+	PermWarehousesArchive,
+	PermAttributesManage,
+	PermIndustriesManage,
+	PermAnswersWrite,
+	PermEnquiriesRead,
+	PermEnquiriesWrite,
+	PermAnalyticsRead,
+	PermStaffInvite,
 }
 
 var knownPermissions = func() map[string]bool {
@@ -60,6 +86,9 @@ var superuserTier = map[Permission]bool{
 	// migrations.run can touch every user doc and drop an index —
 	// a platform-level lever, not a support capability.
 	PermMigrationsRun: true,
+	// staff.invite mints staff with a role pre-attached — the same power as
+	// role assignment (D-012), so it lives with roles.write.
+	PermStaffInvite: true,
 }
 
 // IsKnownPermission reports whether key is a defined permission constant.

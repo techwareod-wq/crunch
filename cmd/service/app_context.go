@@ -36,6 +36,8 @@ func ProvideAppContext(appCtx *config.AppContext, mods []modules.Module) error {
 		models.EnsureAdminActionIndexes,
 		models.EnsureCronClaimIndexes,
 		models.EnsureCronRunIndexes,
+		models.EnsureChangeLogIndexes,
+		models.EnsureStaffInviteIndexes,
 	} {
 		if err := ensure(context.Background()); err != nil {
 			return err

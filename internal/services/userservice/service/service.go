@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"strings"
+	"time"
+	"unicode/utf8"
 
 	errors "github.com/atharva-ng/crunch/internal/errors"
 	"github.com/atharva-ng/crunch/internal/models"
@@ -9,6 +12,7 @@ import (
 	"github.com/atharva-ng/crunch/internal/services/userservice/dto"
 	userstore "github.com/atharva-ng/crunch/internal/services/userservice/store"
 	"github.com/atharva-ng/crunch/internal/util/log"
+	"github.com/atharva-ng/crunch/internal/utils"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
@@ -45,6 +49,35 @@ func (svc *service) GetProfile(ctx context.Context, userID string) (*dto.UserRes
 		return nil, err
 	}
 	return result, nil
+}
+
+// maxCompanyLen bounds the free-text company name.
+const maxCompanyLen = 200
+
+// UpdateProfile normalises the phone to E.164 (default region IN, D-100) and
+// stores phone + company. An empty phone clears both phone fields.
+func (svc *service) UpdateProfile(ctx context.Context, userID string, req dto.UpdateProfileRequest) (*dto.UserResponse, error) {
+	phone := strings.TrimSpace(req.Phone)
+	company := strings.TrimSpace(req.Company)
+	if utf8.RuneCountInString(company) > maxCompanyLen {
+		return nil, errors.ErrInvalidRequestBody
+	}
+	e164 := ""
+	if phone != "" {
+		var err error
+		if e164, err = utils.NormalizePhone(phone, utils.DefaultPhoneRegion); err != nil {
+			return nil, errors.ErrInvalidPhone
+		}
+	}
+	if err := svc.store.UpdateUserByID(ctx, userID, bson.M{
+		"phone":              phone,
+		"phone_e164":         e164,
+		"company":            company,
+		"profile_updated_at": time.Now().UTC(),
+	}); err != nil {
+		return nil, err
+	}
+	return svc.GetProfile(ctx, userID)
 }
 
 // SyncUser creates or updates a local user record from Clerk webhook data.

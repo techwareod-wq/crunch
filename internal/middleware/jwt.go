@@ -17,6 +17,17 @@ import (
 
 const bearerPrefixLen = 7 // length of "Bearer "
 
+// userCreatedHook runs after JWT auto-create inserts a new user (staff invite
+// role apply, D-011). Set once at boot; nil = no-op. It must not fail auth:
+// errors are the hook's to log.
+var userCreatedHook func(ctx context.Context, u *models.User)
+
+// SetUserCreatedHook installs the post-auto-create hook. Call at boot, before
+// serving.
+func SetUserCreatedHook(fn func(ctx context.Context, u *models.User)) {
+	userCreatedHook = fn
+}
+
 func (p pattern) WithJWTAuthentication() pattern {
 	decorate := authenticateWithClerk()
 	ro := routes[string(p)]
@@ -150,6 +161,9 @@ func resolveUserByClerkID(ctx context.Context, clerkID string) (*models.User, er
 		return existing, nil
 	}
 
+	if userCreatedHook != nil {
+		userCreatedHook(ctx, newUser)
+	}
 	return newUser, nil
 }
 
@@ -163,4 +177,35 @@ func GetUserFromContext(r *http.Request) *models.User {
 func GetUserEmailFromContext(r *http.Request) string {
 	email, _ := r.Context().Value(UserEmailKey).(string)
 	return email
+}
+
+// WithOptionalJWT attaches the caller when a valid Clerk bearer token is
+// present and otherwise lets the request through anonymously. A missing,
+// malformed, expired or deactivated-user token is treated as anonymous — never
+// a 401 — so public endpoints (/v1/public/*) answer the same for everyone and
+// only gain personalisation (e.g. staff exclusion in analytics) when signed in.
+// Handlers read the caller with GetOptionalUserFromContext.
+func (p pattern) WithOptionalJWT() pattern {
+	ro := routes[string(p)]
+	routes[string(p)] = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get(HeaderAuthorization) == "" {
+			ro.ServeHTTP(w, r)
+			return
+		}
+		ctx, err := doClerkAuthentication(r)
+		if err != nil {
+			log.Debug("optional auth: continuing anonymously", "error", err, "path", r.URL.Path)
+			ro.ServeHTTP(w, r)
+			return
+		}
+		ro.ServeHTTP(w, r.WithContext(ctx))
+	})
+	return p
+}
+
+// GetOptionalUserFromContext returns the authenticated user, or nil for an
+// anonymous request (routes using WithOptionalJWT).
+func GetOptionalUserFromContext(r *http.Request) *models.User {
+	u, _ := r.Context().Value(UserContextKey).(*models.User)
+	return u
 }

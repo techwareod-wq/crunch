@@ -46,7 +46,7 @@ func TestAdminGate_BaselineAdminAccessPasses(t *testing.T) {
 	h := buildAdminRouteRBAC(t, "/test/rbac-baseline")
 
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, requestWithRoleUser(models.RoleKeyAdmin, "admin@x.com"))
+	h.ServeHTTP(rec, requestWithRoleUser(models.RoleKeyApprover, "admin@x.com"))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("admin on baseline route: status = %d, want 200 (body: %s)", rec.Code, rec.Body.String())
 	}
@@ -57,7 +57,7 @@ func TestAdminGate_AdminHoldsDomainPermission(t *testing.T) {
 	h := buildAdminRouteRBAC(t, "/test/rbac-users", authz.PermUsersRead)
 
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, requestWithRoleUser(models.RoleKeyAdmin, "admin@x.com"))
+	h.ServeHTTP(rec, requestWithRoleUser(models.RoleKeyApprover, "admin@x.com"))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("admin on users.read route: status = %d, want 200", rec.Code)
 	}
@@ -69,7 +69,7 @@ func TestAdminGate_MissingRequiredPermIsForbiddenAndAudited(t *testing.T) {
 	h := buildAdminRouteRBAC(t, "/test/rbac-superonly", authz.PermRolesWrite)
 
 	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, requestWithRoleUser(models.RoleKeyAdmin, "admin@x.com"))
+	h.ServeHTTP(rec, requestWithRoleUser(models.RoleKeyApprover, "admin@x.com"))
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("admin on roles.write route: status = %d, want 403", rec.Code)
 	}

@@ -19,6 +19,7 @@ type Store interface {
 	FindUserByEmail(ctx context.Context, email string) (bool, *models.User, error)
 	CreateUser(ctx context.Context, user *models.User) error
 	UpdateUserByClerkID(ctx context.Context, clerkID string, update bson.M) error
+	UpdateUserByID(ctx context.Context, id string, update bson.M) error
 	DeactivateUserByClerkID(ctx context.Context, clerkID string) error
 }
 
@@ -50,6 +51,10 @@ func (s *store) CreateUser(ctx context.Context, user *models.User) error {
 
 func (s *store) UpdateUserByClerkID(ctx context.Context, clerkID string, update bson.M) error {
 	return models.UpdateUserByClerkID(ctx, clerkID, update)
+}
+
+func (s *store) UpdateUserByID(ctx context.Context, id string, update bson.M) error {
+	return models.UpdateUser(ctx, id, update)
 }
 
 func (s *store) DeactivateUserByClerkID(ctx context.Context, clerkID string) error {

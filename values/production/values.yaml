@@ -1,6 +1,6 @@
 server:
   port: "3090"
-  defaultDBName: "crunch"
+  defaultDBName: "crunchDB"
   awsRegion: "ap-south-1"
   # Only requests whose Host header matches are served; direct-IP requests
   # (Host = the IP) are rejected. Loopback and /health are always allowed.
@@ -20,6 +20,8 @@ admin:
     usersMax: 100
     auditDefault: 50
     auditMax: 200
+  # Staff invites (D-011): days an invite stays usable (also Clerk's expiry).
+  staffInviteExpiryDays: 30
 
 async:
   workerCount: 40
@@ -49,6 +51,12 @@ s3:
   presignPutExpirySeconds: 3600        # 60 minutes
   presignMultipartExpirySeconds: 5400  # 90 minutes
   maxConcurrency: 10
+
+# Media link lifetimes (D-015/D-062). Buckets are env vars
+# (AWS_S3_PUBLIC_BUCKET / AWS_S3_PRIVATE_BUCKET); no ACLs anywhere.
+storage:
+  privateLinkSeconds: 300  # 5 min presigned GET for staff-only docs
+  uploadLinkSeconds: 900   # 15 min presigned PUT for uploads
 
 llm:
   defaultProvider: "anthropic"  # "anthropic" | "openai" | "gemini"; env override LLM_DEFAULT_PROVIDER
@@ -91,7 +99,13 @@ cron:
   claimStaleSeconds: 600
   # IANA fallback zone for schedule validation and users with no stored zone.
   defaultZone: "Asia/Kolkata"
-  jobs:
-    # Demo module (internal/modules/demo): enqueues one DEMO_SUMMARIZE per day.
-    # Dark by default; flip on to prove the cron → queue → LLM path.
-    demo_heartbeat: { enabled: false, at: "09:00", zone: "Asia/Kolkata" }
+  # Per-job switches, keyed by job name. Feature modules add theirs here.
+  jobs: {}
+
+# WarehouseHub feature tunables. Each feature module adds its own sub-block
+# (attributes, catalog, search, aisearch, enquiries, analytics) as it lands.
+warehousehub:
+  # Base URLs used to build links in emails, JSON-LD and the sitemap.
+  # TODO(D-005): set once the domain/branding is decided.
+  publicBaseURL: ""
+  adminBaseURL: ""

@@ -36,6 +36,12 @@ func (f *fakeClerk) DeleteUser(ctx context.Context, clerkID string) error {
 	return f.err
 }
 
+// The invitation calls are unused by the deletion cascade.
+func (f *fakeClerk) CreateInvitation(context.Context, string, map[string]any, string, int) (string, error) {
+	return "", nil
+}
+func (f *fakeClerk) RevokeInvitation(context.Context, string) error { return nil }
+
 // fakeCleaner deletes its docs on the first run and zero-matches afterwards,
 // like a real zero-match-OK cleaner.
 type fakeCleaner struct {
