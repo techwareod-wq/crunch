@@ -97,7 +97,7 @@ func (s *svc) WarehouseDetail(ctx context.Context, warehouseID primitive.ObjectI
 	if w.OpenRevisionID != nil {
 		if rev, err := s.store.GetRevision(ctx, *w.OpenRevisionID); err == nil {
 			out.OpenRevision = rev
-			out.Preview = s.preview(s.rules.Snapshot(), rev.Content, media)
+			out.Preview = s.preview(s.rules.Snapshot(), rev.Content)
 		}
 	}
 	return out, nil

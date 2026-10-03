@@ -12,8 +12,10 @@ import (
 // Handle registers the enquiry routes (spec 06): the signed-in visitor's
 // form, and the inbox for the editor permission (D-112).
 func Handle(appCtx *config.AppContext) {
-	// D-018: no captcha and no rate limit; Clerk sign-in is the only gate.
+	// D-018: no captcha and no rate limit; Clerk sign-in plus the enquiries
+	// feature are the only gates.
 	middleware.Handle("/v1/enquiries", http.HandlerFunc(HandleSubmit)).
+		WithFeature(authz.FeatureEnquiries).
 		WithJWTAuthentication().
 		With(middleware.DeserializeJson[enquiryService.SubmitRequest]()).
 		WithMethods(http.MethodPost).

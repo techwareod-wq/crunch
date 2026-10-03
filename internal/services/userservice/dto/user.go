@@ -3,6 +3,7 @@ package dto
 import (
 	"time"
 
+	"github.com/atharva-ng/crunch/internal/authz"
 	"github.com/atharva-ng/crunch/internal/models"
 )
 
@@ -12,6 +13,8 @@ type UserResponse struct {
 	Email   string `json:"email"`
 	Name    string `json:"name"`
 	Role    string `json:"role"`
+	// Features are the visitor features the user may use (staff: all).
+	Features []string `json:"features"`
 	// Visitor profile (D-100).
 	Phone            string     `json:"phone"`
 	PhoneE164        string     `json:"phoneE164"`
@@ -25,6 +28,7 @@ func (u *UserResponse) FromDbModel(m *models.User) error {
 	u.Email = m.Email
 	u.Name = m.Name
 	u.Role = m.Role
+	u.Features = authz.EffectiveFeatures(m)
 	u.Phone = m.Phone
 	u.PhoneE164 = m.PhoneE164
 	u.Company = m.Company

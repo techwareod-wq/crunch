@@ -98,10 +98,10 @@ func (g *geoResolver) resolve(ctx context.Context, loc domain.SearchLocation) (r
 func (g *geoResolver) google(ctx context.Context, loc domain.SearchLocation, kind string) (resolved, error) {
 	gc := g.geocoder()
 	if gc == nil {
-		return resolved{}, errors.New("no geocoder configured")
+		return resolved{}, searchService.ErrNoGeocoder
 	}
 	if !g.allow() {
-		return resolved{}, errors.New("geocoder circuit open")
+		return resolved{}, searchService.ErrGeocoderCircuitOpen
 	}
 	address := loc.Place
 	if kind == "pin" {

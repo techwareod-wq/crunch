@@ -7,7 +7,6 @@ package analyticsService
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/atharva-ng/crunch/internal/models"
 	"github.com/atharva-ng/crunch/internal/pipeline"
@@ -15,16 +14,6 @@ import (
 	"github.com/atharva-ng/crunch/internal/services/analyticsService/dto"
 	"github.com/atharva-ng/crunch/internal/warehousehub/domain"
 )
-
-// ValidationError is a 400.
-type ValidationError struct{ Msg string }
-
-func (e *ValidationError) Error() string { return e.Msg }
-
-// Invalidf formats a ValidationError.
-func Invalidf(format string, a ...any) error {
-	return &ValidationError{Msg: fmt.Sprintf(format, a...)}
-}
 
 // ProcessRollupDaily rolls up yesterday plus any missed day still inside
 // the raw window (cron analytics_rollup_daily).

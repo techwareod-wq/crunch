@@ -15,35 +15,136 @@ import (
 // `attributes` permission, hard deletes (nodes/fields/options, industries)
 // for superusers (D-122, D-129).
 func Handle(appCtx *config.AppContext) {
-	route := func(path string, h http.HandlerFunc, method string, body func(http.Handler) http.Handler, required ...authz.Permission) {
-		p := middleware.Handle(path, h).
-			WithAdminAuthorization(required...).
-			WithJWTAuthentication()
-		if body != nil {
-			p = p.With(body)
-		}
-		p.WithMethods(method).
-			With(appCtx.Middleware()).
-			AllowCORS().
-			WithLogEnabled()
-	}
-	get, post := http.MethodGet, http.MethodPost
-	attrs := authz.PermAttributes
+	middleware.Handle("/v1/admin/attributes/tree", http.HandlerFunc(HandleTree)).
+		WithAdminAuthorization().
+		WithJWTAuthentication().
+		WithMethods(http.MethodGet).
+		With(appCtx.Middleware()).
+		AllowCORS().
+		WithLogEnabled()
 
-	route("/v1/admin/attributes/tree", HandleTree, get, nil)
-	route("/v1/admin/attributes/nodes/create", HandleNodeCreate, post, middleware.DeserializeJson[createNodeRequest](), attrs)
-	route("/v1/admin/attributes/nodes/update", HandleNodeUpdate, post, middleware.DeserializeJson[attributeService.NodePatch](), attrs)
-	route("/v1/admin/attributes/nodes/move", HandleNodeMove, post, middleware.DeserializeJson[moveRequest](), attrs)
-	route("/v1/admin/attributes/nodes/reorder", HandleNodeReorder, post, middleware.DeserializeJson[reorderNodesRequest](), attrs)
-	route("/v1/admin/attributes/fields/create", HandleFieldCreate, post, middleware.DeserializeJson[fieldRequest](), attrs)
-	route("/v1/admin/attributes/fields/update", HandleFieldUpdate, post, middleware.DeserializeJson[fieldRequest](), attrs)
-	route("/v1/admin/attributes/fields/reorder", HandleFieldReorder, post, middleware.DeserializeJson[reorderFieldsRequest](), attrs)
-	route("/v1/admin/attributes/nodes/delete", HandleNodeDelete, post, middleware.DeserializeJson[attributeService.DeleteTarget](), authz.PermSuperuser)
-	route("/v1/admin/attributes/fields/delete", HandleFieldDelete, post, middleware.DeserializeJson[attributeService.DeleteTarget](), authz.PermSuperuser)
-	route("/v1/admin/attributes/options/delete", HandleOptionDelete, post, middleware.DeserializeJson[attributeService.DeleteTarget](), authz.PermSuperuser)
+	middleware.Handle("/v1/admin/attributes/nodes/create", http.HandlerFunc(HandleNodeCreate)).
+		WithAdminAuthorization(authz.PermAttributes).
+		WithJWTAuthentication().
+		With(middleware.DeserializeJson[createNodeRequest]()).
+		WithMethods(http.MethodPost).
+		With(appCtx.Middleware()).
+		AllowCORS().
+		WithLogEnabled()
 
-	route("/v1/admin/industries", HandleIndustries, get, nil)
-	route("/v1/admin/industries/create", HandleIndustryCreate, post, middleware.DeserializeJson[models.Industry](), attrs)
-	route("/v1/admin/industries/update", HandleIndustryUpdate, post, middleware.DeserializeJson[attributeService.IndustryPatch](), attrs)
-	route("/v1/admin/industries/delete", HandleIndustryDelete, post, middleware.DeserializeJson[deleteIndustryRequest](), authz.PermSuperuser)
+	middleware.Handle("/v1/admin/attributes/nodes/update", http.HandlerFunc(HandleNodeUpdate)).
+		WithAdminAuthorization(authz.PermAttributes).
+		WithJWTAuthentication().
+		With(middleware.DeserializeJson[attributeService.NodePatch]()).
+		WithMethods(http.MethodPost).
+		With(appCtx.Middleware()).
+		AllowCORS().
+		WithLogEnabled()
+
+	middleware.Handle("/v1/admin/attributes/nodes/move", http.HandlerFunc(HandleNodeMove)).
+		WithAdminAuthorization(authz.PermAttributes).
+		WithJWTAuthentication().
+		With(middleware.DeserializeJson[moveRequest]()).
+		WithMethods(http.MethodPost).
+		With(appCtx.Middleware()).
+		AllowCORS().
+		WithLogEnabled()
+
+	middleware.Handle("/v1/admin/attributes/nodes/reorder", http.HandlerFunc(HandleNodeReorder)).
+		WithAdminAuthorization(authz.PermAttributes).
+		WithJWTAuthentication().
+		With(middleware.DeserializeJson[reorderNodesRequest]()).
+		WithMethods(http.MethodPost).
+		With(appCtx.Middleware()).
+		AllowCORS().
+		WithLogEnabled()
+
+	middleware.Handle("/v1/admin/attributes/fields/create", http.HandlerFunc(HandleFieldCreate)).
+		WithAdminAuthorization(authz.PermAttributes).
+		WithJWTAuthentication().
+		With(middleware.DeserializeJson[fieldRequest]()).
+		WithMethods(http.MethodPost).
+		With(appCtx.Middleware()).
+		AllowCORS().
+		WithLogEnabled()
+
+	middleware.Handle("/v1/admin/attributes/fields/update", http.HandlerFunc(HandleFieldUpdate)).
+		WithAdminAuthorization(authz.PermAttributes).
+		WithJWTAuthentication().
+		With(middleware.DeserializeJson[fieldRequest]()).
+		WithMethods(http.MethodPost).
+		With(appCtx.Middleware()).
+		AllowCORS().
+		WithLogEnabled()
+
+	middleware.Handle("/v1/admin/attributes/fields/reorder", http.HandlerFunc(HandleFieldReorder)).
+		WithAdminAuthorization(authz.PermAttributes).
+		WithJWTAuthentication().
+		With(middleware.DeserializeJson[reorderFieldsRequest]()).
+		WithMethods(http.MethodPost).
+		With(appCtx.Middleware()).
+		AllowCORS().
+		WithLogEnabled()
+
+	middleware.Handle("/v1/admin/attributes/nodes/delete", http.HandlerFunc(HandleNodeDelete)).
+		WithAdminAuthorization(authz.PermSuperuser).
+		WithJWTAuthentication().
+		With(middleware.DeserializeJson[attributeService.DeleteTarget]()).
+		WithMethods(http.MethodPost).
+		With(appCtx.Middleware()).
+		AllowCORS().
+		WithLogEnabled()
+
+	middleware.Handle("/v1/admin/attributes/fields/delete", http.HandlerFunc(HandleFieldDelete)).
+		WithAdminAuthorization(authz.PermSuperuser).
+		WithJWTAuthentication().
+		With(middleware.DeserializeJson[attributeService.DeleteTarget]()).
+		WithMethods(http.MethodPost).
+		With(appCtx.Middleware()).
+		AllowCORS().
+		WithLogEnabled()
+
+	middleware.Handle("/v1/admin/attributes/options/delete", http.HandlerFunc(HandleOptionDelete)).
+		WithAdminAuthorization(authz.PermSuperuser).
+		WithJWTAuthentication().
+		With(middleware.DeserializeJson[attributeService.DeleteTarget]()).
+		WithMethods(http.MethodPost).
+		With(appCtx.Middleware()).
+		AllowCORS().
+		WithLogEnabled()
+
+	middleware.Handle("/v1/admin/industries", http.HandlerFunc(HandleIndustries)).
+		WithAdminAuthorization().
+		WithJWTAuthentication().
+		WithMethods(http.MethodGet).
+		With(appCtx.Middleware()).
+		AllowCORS().
+		WithLogEnabled()
+
+	middleware.Handle("/v1/admin/industries/create", http.HandlerFunc(HandleIndustryCreate)).
+		WithAdminAuthorization(authz.PermAttributes).
+		WithJWTAuthentication().
+		With(middleware.DeserializeJson[models.Industry]()).
+		WithMethods(http.MethodPost).
+		With(appCtx.Middleware()).
+		AllowCORS().
+		WithLogEnabled()
+
+	middleware.Handle("/v1/admin/industries/update", http.HandlerFunc(HandleIndustryUpdate)).
+		WithAdminAuthorization(authz.PermAttributes).
+		WithJWTAuthentication().
+		With(middleware.DeserializeJson[attributeService.IndustryPatch]()).
+		WithMethods(http.MethodPost).
+		With(appCtx.Middleware()).
+		AllowCORS().
+		WithLogEnabled()
+
+	middleware.Handle("/v1/admin/industries/delete", http.HandlerFunc(HandleIndustryDelete)).
+		WithAdminAuthorization(authz.PermSuperuser).
+		WithJWTAuthentication().
+		With(middleware.DeserializeJson[deleteIndustryRequest]()).
+		WithMethods(http.MethodPost).
+		With(appCtx.Middleware()).
+		AllowCORS().
+		WithLogEnabled()
 }

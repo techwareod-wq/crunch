@@ -41,9 +41,9 @@ func (s *svc) record(ctx context.Context, actor domain.Actor, entity domain.Chan
 	s.log.Record(ctx, domain.ChangeEntry{Entity: entity, EntityID: id, Action: action, Actor: actor, Before: before, After: after, Meta: meta})
 }
 
-func (s *svc) preview(snap *domain.Snapshot, c models.ListingContent, media []models.WarehouseMedia) *dto.Preview {
+func (s *svc) preview(snap *domain.Snapshot, c models.ListingContent) *dto.Preview {
 	res := domain.Evaluate(snap, c.Attributes, s.now().UTC())
-	problems := submitProblems(snap, c, media)
+	problems := submitProblems(snap, c)
 	if problems == nil {
 		problems = []string{}
 	}
@@ -119,7 +119,7 @@ func (s *svc) Create(ctx context.Context, actor domain.Actor, content models.Lis
 	w.OpenRevisionID = &r.ID
 	s.record(ctx, actor, domain.EntityWarehouse, w.ID.Hex(), domain.ActionCreate, nil, w, nil)
 	s.record(ctx, actor, domain.EntityRevision, r.ID.Hex(), domain.ActionCreate, nil, r, nil)
-	return w, catalogService.RevisionResult{Revision: r, Preview: s.preview(snap, norm, nil)}, nil
+	return w, catalogService.RevisionResult{Revision: r, Preview: s.preview(snap, norm)}, nil
 }
 
 // Open clones the live content into a new draft (edit live / archived).
@@ -169,8 +169,7 @@ func (s *svc) openFromLive(ctx context.Context, actor domain.Actor, warehouseID 
 		action = domain.ActionRestore
 	}
 	s.record(ctx, actor, domain.EntityRevision, r.ID.Hex(), action, nil, r, map[string]any{"baseVersion": r.BaseVersion})
-	media, _ := s.store.ListMedia(ctx, w.ID)
-	return catalogService.RevisionResult{Revision: r, Preview: s.preview(s.rules.Snapshot(), r.Content, media)}, nil
+	return catalogService.RevisionResult{Revision: r, Preview: s.preview(s.rules.Snapshot(), r.Content)}, nil
 }
 
 // cloneContent deep-copies the parts a draft edit may mutate.
@@ -239,7 +238,7 @@ func (s *svc) Save(ctx context.Context, actor domain.Actor, req catalogService.S
 	if err := s.store.SetDraftName(ctx, r.WarehouseID, name, city, r.UpdatedAt); err != nil {
 		log.Error("catalog: hoist draft name failed", "warehouse", r.WarehouseID.Hex(), "error", err)
 	}
-	return catalogService.RevisionResult{Revision: &r, Preview: s.preview(snap, content, media), Warnings: warnings}, nil
+	return catalogService.RevisionResult{Revision: &r, Preview: s.preview(snap, content), Warnings: warnings}, nil
 }
 
 // --- review flow ---
@@ -253,11 +252,7 @@ func (s *svc) Submit(ctx context.Context, actor domain.Actor, id primitive.Objec
 	if old.State != models.RevDraft {
 		return catalogService.RevisionResult{}, catalogService.Conflict(catalogService.CodeBadState, "only a draft can be submitted (it is %s)", old.State)
 	}
-	media, err := s.store.ListMedia(ctx, old.WarehouseID)
-	if err != nil {
-		return catalogService.RevisionResult{}, err
-	}
-	if problems := submitProblems(s.rules.Snapshot(), old.Content, media); len(problems) > 0 {
+	if problems := submitProblems(s.rules.Snapshot(), old.Content); len(problems) > 0 {
 		return catalogService.RevisionResult{}, &catalogService.SubmitBlockedError{Problems: problems}
 	}
 	now := s.now().UTC()
@@ -341,9 +336,6 @@ func (s *svc) Approve(ctx context.Context, actor domain.Actor, id primitive.Obje
 	resumed := false
 	switch old.State {
 	case models.RevInReview:
-		if old.SubmittedByID != "" && old.SubmittedByID == actor.UserID && !s.cfg().AllowSelfApprove {
-			return catalogService.RevisionResult{}, catalogService.Conflict(catalogService.CodeSelfApprove, "you submitted this — another approver must approve it (D-053)")
-		}
 		// 1. CAS in_review → approved.
 		now := s.now().UTC()
 		r.State, r.ApprovedBy, r.ApprovedAt = models.RevApproved, actor.Email, &now

@@ -48,7 +48,7 @@ func NewService(st store.Store, rules domain.Rules, search searchService.SearchS
 	embedder interfaces.Embedder, dispatcher interfaces.Dispatcher, values config.AISearchValues) aiSearchService.AISearchService {
 	dispatch := func(ctx context.Context, pt pipeline.ProcessType, key string, payload any) error {
 		if dispatcher == nil {
-			return errors.New("dispatcher not wired")
+			return aiSearchService.ErrNoDispatcher
 		}
 		return dispatcher.DispatchKeyed(ctx, string(pt), systemUserID, key, payload)
 	}
@@ -108,7 +108,7 @@ func (s *svc) Search(ctx context.Context, req aiSearchService.Request, v searchS
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			ai.Notes = append(ai.Notes, "llm_timeout")
-		} else if !errors.Is(err, errNoLLM) {
+		} else if !errors.Is(err, aiSearchService.ErrNoLLM) {
 			log.Warn("aisearch: extraction failed", "error", err)
 		}
 		b = fromHints(snap, q, h, loc)
@@ -205,7 +205,7 @@ func (s *svc) fallback(ctx context.Context, q, country string, resp *domain.Sear
 
 func (s *svc) similar(ctx context.Context, q string, fq searchService.FallbackQuery) ([]domain.SearchCard, error) {
 	if s.embedder == nil {
-		return nil, errors.New("no embedder configured")
+		return nil, aiSearchService.ErrNoEmbedder
 	}
 	vecs, err := s.embedder.Embed(ctx, []string{q}, interfaces.EmbedQuery)
 	if err != nil {

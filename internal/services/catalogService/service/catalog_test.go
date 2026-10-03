@@ -259,10 +259,13 @@ func TestSubmitGate(t *testing.T) {
 		t.Fatalf("empty draft submitted: %v", err)
 	}
 	joined := strings.Join(sb.Problems, "\n")
-	for _, want := range []string{"warehouse.name", "warehouse.address", "warehouse.location", "warehouse.total_area", "warehouse.rent", "cover photo"} {
+	for _, want := range []string{"warehouse.name", "warehouse.address", "warehouse.location", "warehouse.total_area", "warehouse.rent"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("missing problem %q in %v", want, sb.Problems)
 		}
+	}
+	if strings.Contains(joined, "cover") {
+		t.Errorf("cover photo should be optional: %v", sb.Problems)
 	}
 
 	// Approximate pin blocks; manual fix unblocks.
@@ -340,12 +343,8 @@ func TestSelfApprove(t *testing.T) {
 	h := newHarness()
 	_, r := h.draft(t)
 	h.svc.Submit(ctx, approver, r.ID, "")
-	if _, err := h.svc.Approve(ctx, approver, r.ID, ""); code(err) != catalogService.CodeSelfApprove {
-		t.Fatalf("self approve: %v", err)
-	}
-	h.cfg.AllowSelfApprove = true
 	if _, err := h.svc.Approve(ctx, approver, r.ID, ""); err != nil {
-		t.Fatalf("self approve with switch: %v", err)
+		t.Fatalf("self approve: %v", err)
 	}
 }
 

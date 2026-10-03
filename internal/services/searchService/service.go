@@ -7,30 +7,10 @@ package searchService
 
 import (
 	"context"
-	"errors"
-	"fmt"
 
-	"github.com/atharva-ng/crunch/internal/models"
 	"github.com/atharva-ng/crunch/internal/services/searchService/dto"
 	"github.com/atharva-ng/crunch/internal/warehousehub/domain"
 )
-
-// ErrNotFound: a location that resolves nowhere.
-var ErrNotFound = models.ErrNotFound
-
-// ErrGeoUnavailable: every geocoding source failed (resolve endpoint only;
-// search degrades instead, D-078).
-var ErrGeoUnavailable = errors.New("geocoding unavailable")
-
-// ValidationError is a 400.
-type ValidationError struct{ Msg string }
-
-func (e *ValidationError) Error() string { return e.Msg }
-
-// Invalidf formats a ValidationError.
-func Invalidf(format string, a ...any) error {
-	return &ValidationError{Msg: fmt.Sprintf(format, a...)}
-}
 
 // Viewer is who is searching (optional auth, P-5), for analytics.
 type Viewer struct {

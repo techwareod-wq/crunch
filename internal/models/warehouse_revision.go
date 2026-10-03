@@ -55,7 +55,7 @@ type WarehouseRevision struct {
 	CreatedAt   time.Time      `bson:"created_at"             json:"createdAt"`
 	UpdatedAt   time.Time      `bson:"updated_at"             json:"updatedAt"`
 	SubmittedBy string         `bson:"submitted_by,omitempty" json:"submittedBy,omitempty"`
-	// SubmittedByID is the submitter's user id (self-approve check, D-053).
+	// SubmittedByID is the submitter's user id.
 	SubmittedByID string     `bson:"submitted_by_id,omitempty" json:"-"`
 	SubmittedAt   *time.Time `bson:"submitted_at,omitempty"    json:"submittedAt,omitempty"`
 	ApprovedBy    string     `bson:"approved_by,omitempty"     json:"approvedBy,omitempty"`

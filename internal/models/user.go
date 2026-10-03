@@ -39,7 +39,11 @@ type User struct {
 	// Permissions are an admin's assignable permissions: any of "editor",
 	// "approver", "attributes". Ignored for any other role.
 	Permissions []string `bson:"permissions,omitempty" json:"permissions,omitempty"`
-	// RoleUpdatedAt is the optimistic-concurrency token for access edits.
+	// Features are the visitor features a superuser granted (authz.Features).
+	// Staff hold every feature regardless.
+	Features []string `bson:"features,omitempty" json:"features,omitempty"`
+	// RoleUpdatedAt is the optimistic-concurrency token for access edits
+	// (role, permissions and features).
 	RoleUpdatedAt *time.Time `bson:"role_updated_at,omitempty" json:"role_updated_at,omitempty"`
 	CreatedAt     time.Time  `bson:"created_at"                  json:"created_at"`
 	UpdatedAt     time.Time  `bson:"updated_at"                  json:"updated_at"`
@@ -261,6 +265,40 @@ func SetUserAccess(ctx context.Context, userID primitive.ObjectID, role string, 
 		}
 		if !found {
 			return fmt.Errorf("set user access: user %s not found", userID.Hex())
+		}
+		return ErrRoleConflictOnUser
+	}
+	return nil
+}
+
+// SetUserFeatures replaces the user's features with optimistic concurrency on
+// role_updated_at (the same token as SetUserAccess, so a concurrent access
+// edit and features edit can't clobber each other).
+func SetUserFeatures(ctx context.Context, userID primitive.ObjectID, features []string, expected *time.Time) error {
+	filter := activeFilter(bson.M{fieldID: userID})
+	if expected != nil {
+		filter["role_updated_at"] = expected.UTC()
+	} else {
+		filter["role_updated_at"] = nil // matches absent or null
+	}
+	now := time.Now().UTC()
+	update := bson.M{"$set": bson.M{"role_updated_at": now, fieldUpdatedAt: now}}
+	if len(features) > 0 {
+		update["$set"].(bson.M)["features"] = features
+	} else {
+		update["$unset"] = bson.M{"features": ""}
+	}
+	res, err := Collection(usersCollection).UpdateOne(ctx, filter, update)
+	if err != nil {
+		return err
+	}
+	if res.MatchedCount == 0 {
+		found, _, ferr := FindUserByIDIncludingDeactivated(ctx, userID.Hex())
+		if ferr != nil {
+			return ferr
+		}
+		if !found {
+			return fmt.Errorf("set user features: user %s not found", userID.Hex())
 		}
 		return ErrRoleConflictOnUser
 	}

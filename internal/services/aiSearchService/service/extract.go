@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -11,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/atharva-ng/crunch/internal/dto"
+	"github.com/atharva-ng/crunch/internal/services/aiSearchService"
 	"github.com/atharva-ng/crunch/internal/warehousehub/domain"
 )
 
@@ -45,15 +45,12 @@ type extraction struct {
 	Confidence string   `json:"confidence"`
 }
 
-// errNoLLM: no Anthropic key configured.
-var errNoLLM = errors.New("llm not configured")
-
 // extract asks the model for set_filters under the hard deadline. Any
 // failure (timeout, API error, truncated or malformed tool call) is an
 // error: the caller runs the basic search (D-088).
 func (s *svc) extract(ctx context.Context, p prompt, q string, h hints) (*extraction, error) {
 	if s.llm == nil {
-		return nil, errNoLLM
+		return nil, aiSearchService.ErrNoLLM
 	}
 	cfg := s.cfg()
 	ctx, cancel := context.WithTimeout(ctx, millis(cfg.LLMDeadlineMillis, 2200))
@@ -72,10 +69,10 @@ func (s *svc) extract(ctx context.Context, p prompt, q string, h hints) (*extrac
 		return nil, err
 	}
 	if resp.StopReason == dto.StopReasonMaxTokens {
-		return nil, errors.New("tool call truncated")
+		return nil, aiSearchService.ErrToolCallTruncated
 	}
 	if resp.ToolUse == nil || resp.ToolUse.Name != toolName {
-		return nil, errors.New("no set_filters call")
+		return nil, aiSearchService.ErrNoSetFilters
 	}
 	var ext extraction
 	if err := json.Unmarshal(resp.ToolUse.Input, &ext); err != nil {

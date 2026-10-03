@@ -10,7 +10,7 @@ import (
 )
 
 // Handle registers AI search (spec 05): the public natural-language search
-// (no auth, optional token for analytics) and the superuser embedding
+// (sign-in plus the ai_search feature) and the superuser embedding
 // backfill. Nothing is registered while the feature flag
 // (warehousehub.aisearch.enabled) is off.
 func Handle(appCtx *config.AppContext) {
@@ -19,7 +19,8 @@ func Handle(appCtx *config.AppContext) {
 	}
 
 	middleware.Handle("/v1/public/search/ai", http.HandlerFunc(HandleSearch)).
-		WithOptionalJWT().
+		WithFeature(authz.FeatureAISearch).
+		WithJWTAuthentication().
 		With(middleware.DeserializeJson[aiSearchService.Request]()).
 		WithMethods(http.MethodPost).
 		With(appCtx.Middleware()).

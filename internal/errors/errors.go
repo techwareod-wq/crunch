@@ -21,6 +21,17 @@ func newError(code int, msg string) *Error {
 	return &Error{Code: code, Message: msg}
 }
 
+// FeatureNotIncluded (403, code feature_not_included) — the caller has some
+// access but not this feature. data.feature names it.
+func FeatureNotIncluded(feature string) *Error {
+	return &Error{
+		Code:    http.StatusForbidden,
+		Message: "you don't have access to this feature",
+		ErrCode: "feature_not_included",
+		Data:    map[string]string{"feature": feature},
+	}
+}
+
 // 400 Bad Request
 var (
 	ErrInvalidRequestBody = newError(http.StatusBadRequest, "invalid request body")
@@ -58,6 +69,9 @@ var (
 	// the /v1/admin prefix is guessable anyway and a clear error is worth more
 	// than obscurity.
 	ErrAdminAccessRequired = newError(http.StatusForbidden, "admin access required")
+	// ErrAccessRequired (code access_required) — the caller holds no features
+	// at all: a superuser hasn't given them access yet.
+	ErrAccessRequired = &Error{Code: http.StatusForbidden, Message: "your account hasn't been given access yet", ErrCode: "access_required"}
 )
 
 // 405 Method Not Allowed
@@ -71,7 +85,9 @@ var (
 	// editor/approver/attributes, and none for role user.
 	ErrInvalidAccess = &Error{Code: http.StatusBadRequest, Message: "role must be user or admin; permissions any of editor, approver, attributes (none for user)", ErrCode: "invalid_access"}
 	// ErrAccessConflict (409): the target's access changed since it was read.
-	ErrAccessConflict = &Error{Code: http.StatusConflict, Message: "access changed since last read — refetch and retry", ErrCode: "access_conflict"}
+	// ErrInvalidFeatures: features must be any of the grantable features.
+	ErrInvalidFeatures = &Error{Code: http.StatusBadRequest, Message: "features must be any of search, ai_search, listings, enquiries", ErrCode: "invalid_features"}
+	ErrAccessConflict  = &Error{Code: http.StatusConflict, Message: "access changed since last read — refetch and retry", ErrCode: "access_conflict"}
 	// ErrSuperuserImmutable (403): superuser accounts are managed only by
 	// cmd/superuser, never through the API.
 	ErrSuperuserImmutable = newError(http.StatusForbidden, "superuser accounts can't be changed from the panel")
@@ -88,7 +104,10 @@ var (
 	// the authorization middleware running without a user in context (a wiring
 	// bug) or a DB failure while resolving the target user. Never a 403: these
 	// are not authorization verdicts.
-	ErrAdminCheckFailed      = newError(http.StatusInternalServerError, "failed to verify admin request")
+	ErrAdminCheckFailed = newError(http.StatusInternalServerError, "failed to verify admin request")
+	// ErrFeatureCheckFailed: the feature gate ran without a user (chain-order
+	// bug). Never a 403.
+	ErrFeatureCheckFailed    = newError(http.StatusInternalServerError, "failed to verify access")
 	ErrLLMServiceUnavailable = newError(http.StatusInternalServerError, "LLM service not available")
 	ErrLLMProcessingFailed   = newError(http.StatusInternalServerError, "failed to process LLM response")
 	// ErrInternal is the generic 500 for an unexpected server-side failure.

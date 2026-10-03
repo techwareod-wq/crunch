@@ -99,8 +99,6 @@ warehousehub:
     # Warehouses per attributes.recompute_batch message.
     recomputeBatchSize: 200
   catalog:
-    # An approver may approve their own submission (D-053).
-    allowSelfApprove: false
     # Media limits (D-062).
     maxPhotos: 30
     maxPhotoBytes: 10485760   # 10 MB

@@ -8,7 +8,6 @@ package attributeService
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -16,26 +15,6 @@ import (
 	"github.com/atharva-ng/crunch/internal/pipeline"
 	"github.com/atharva-ng/crunch/internal/warehousehub/domain"
 )
-
-var (
-	// ErrNotFound: no node / field / industry with that key.
-	ErrNotFound = errors.New("not found")
-	// ErrKeyExists: a node, field or industry with that key already exists.
-	ErrKeyExists = models.ErrDuplicateKey
-	// ErrVersionConflict: the doc changed since the caller read it (CAS).
-	ErrVersionConflict = models.ErrVersionConflict
-)
-
-// ValidationError is a 400: the write breaks a tree / rule invariant.
-type ValidationError struct{ Msg string }
-
-func (e *ValidationError) Error() string { return e.Msg }
-
-// Invalid wraps err as a ValidationError.
-func Invalid(err error) error { return &ValidationError{Msg: err.Error()} }
-
-// Invalidf formats a ValidationError.
-func Invalidf(format string, a ...any) error { return Invalid(fmt.Errorf(format, a...)) }
 
 // NewNodeDefault is what a new node means for warehouses whose parent node is
 // yes (D-126). There is no "yes for all".

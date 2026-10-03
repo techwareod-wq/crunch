@@ -138,8 +138,9 @@ func validMoney(m models.Money) bool {
 }
 
 // submitProblems is the submit gate (spec 03): required fields on yes nodes
-// (02), a precise pin, total area > 0, a cover photo, a usable rent.
-func submitProblems(snap *domain.Snapshot, c models.ListingContent, media []models.WarehouseMedia) []string {
+// (02), a precise pin, total area > 0, a usable rent. A cover photo is
+// optional.
+func submitProblems(snap *domain.Snapshot, c models.ListingContent) []string {
 	out := domain.SubmitProblems(snap, c.Attributes)
 	a := c.Attributes
 	if loc, ok := rootValue[models.Location](a, fieldLocation); ok && strings.EqualFold(loc.Accuracy, interfaces.AccuracyApproximate) {
@@ -151,9 +152,6 @@ func submitProblems(snap *domain.Snapshot, c models.ListingContent, media []mode
 	if rent, ok := rootValue[models.Money](a, fieldRent); ok && !rent.OnRequest && !domain.ValidBasis(rent.Basis) {
 		out = append(out, fmt.Sprintf("warehouse.rent: basis must be %s, %s or %s (or price on request)",
 			domain.BasisPerSqftMonth, domain.BasisPerSqmMonth, domain.BasisFlatMonth))
-	}
-	if coverOf(c, media) == nil {
-		out = append(out, "media: a cover photo is required (D-062)")
 	}
 	return out
 }

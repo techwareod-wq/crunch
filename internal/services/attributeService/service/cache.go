@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/atharva-ng/crunch/internal/services/attributeService"
 	"github.com/atharva-ng/crunch/internal/util/log"
 	"github.com/atharva-ng/crunch/internal/warehousehub/domain"
 )
@@ -63,15 +64,9 @@ func (c *Cache) SnapshotAtLeast(ctx context.Context, v int64) (*domain.Snapshot,
 	}
 	s := c.Snapshot()
 	if s.Version < v {
-		return nil, &staleSnapshotError{have: s.Version, want: v}
+		return nil, &attributeService.StaleSnapshotError{Have: s.Version, Want: v}
 	}
 	return s, nil
-}
-
-type staleSnapshotError struct{ have, want int64 }
-
-func (e *staleSnapshotError) Error() string {
-	return "rules snapshot is older than requested"
 }
 
 // StartRefresh reloads every interval until ctx is cancelled. Failures are

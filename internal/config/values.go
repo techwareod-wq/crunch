@@ -153,9 +153,6 @@ func (v SearchValues) CurrencyFor(country string) string {
 
 // CatalogValues is the `warehousehub.catalog` block.
 type CatalogValues struct {
-	// AllowSelfApprove lets an approver approve a revision they submitted
-	// (D-053, off by default).
-	AllowSelfApprove bool `yaml:"allowSelfApprove"`
 	// MaxPhotos caps a warehouse's photos (D-062).
 	MaxPhotos int `yaml:"maxPhotos"`
 	// MaxPhotoBytes / MaxDocBytes cap one upload (D-062).
