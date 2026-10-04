@@ -53,6 +53,9 @@ type SearchQuery struct {
 	Ranges            []SearchRange
 	// Exclude drops one warehouse (the 410 page's own listing).
 	Exclude primitive.ObjectID
+	// Statuses widens the match beyond live listings (admin search); nil =
+	// live only.
+	Statuses []string
 }
 
 // SearchChip is one chip filter; Unk lists the `unk` keys that make it
@@ -87,10 +90,14 @@ func rangeOf(gte, lte *float64) bson.D {
 	return r
 }
 
-// SearchMatch builds the base match (spec 04): live, country, total area,
-// price (or on request), chips AND, ranges AND, every industry passing.
+// SearchMatch builds the base match (spec 04): live (or q.Statuses),
+// country, total area, price (or on request), chips AND, ranges AND, every
+// industry passing.
 func SearchMatch(q SearchQuery) bson.M {
 	m := bson.M{"status": WarehouseLive}
+	if len(q.Statuses) > 0 {
+		m["status"] = bson.M{"$in": q.Statuses}
+	}
 	if q.Country != "" {
 		m["country"] = q.Country
 	}
@@ -218,6 +225,7 @@ func relevanceTier(industries []string) any {
 // SearchHit is one result card's raw data.
 type SearchHit struct {
 	ID       primitive.ObjectID `bson:"_id"`
+	Status   string             `bson:"status"`
 	ShortID  string             `bson:"short_id"`
 	Slug     string             `bson:"slug"`
 	Name     string             `bson:"name"`
@@ -238,7 +246,7 @@ type SearchHit struct {
 }
 
 var hitProjection = bson.M{
-	"short_id": 1, "slug": 1, "name": 1, "city": 1, "locality": 1, "dist_m": 1, "total_sqm": 1,
+	"status": 1, "short_id": 1, "slug": 1, "name": 1, "city": 1, "locality": 1, "dist_m": 1, "total_sqm": 1,
 	"price": 1, "cover_key": 1, "loc": 1, "fit": 1, "chips": 1, "unk": 1, "nums": 1,
 	"rent": "$live.attributes.warehouse.fields.rent",
 	"area": "$live.attributes.warehouse.fields.total_area",
@@ -405,15 +413,17 @@ func SearchRingCounts(ctx context.Context, near GeoPoint, match bson.M, ringsM [
 
 // MapPoint is one map marker.
 type MapPoint struct {
-	ShortID string   `bson:"short_id"`
-	Loc     GeoPoint `bson:"loc"`
-	Price   *Price   `bson:"price"`
+	ID      primitive.ObjectID `bson:"_id"`
+	Status  string             `bson:"status"`
+	ShortID string             `bson:"short_id"`
+	Loc     GeoPoint           `bson:"loc"`
+	Price   *Price             `bson:"price"`
 }
 
 // SearchMapPoints returns every match's pin (unpaginated, D-077); with near,
 // only those within maxMeters.
 func SearchMapPoints(ctx context.Context, match bson.M, near *GeoPoint, maxMeters float64) ([]MapPoint, error) {
-	proj := bson.M{"short_id": 1, "loc": 1, "price": 1}
+	proj := bson.M{"status": 1, "short_id": 1, "loc": 1, "price": 1}
 	if near != nil {
 		cur, err := warehouses().Aggregate(ctx, mongo.Pipeline{
 			geoNearStage(*near, maxMeters, match),

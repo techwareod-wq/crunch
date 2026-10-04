@@ -290,15 +290,15 @@ func TestIntegrationSearch(t *testing.T) {
 	})
 
 	t.Run("map", func(t *testing.T) {
-		m, etag, err := s.Map(ctx, nil, "IN")
+		m, etag, err := s.Map(ctx, nil, "IN", false)
 		if err != nil || m.Total != 50 || etag == "" {
 			t.Errorf("country map = %d %q %v", m.Total, etag, err)
 		}
-		m, _, err = s.Map(ctx, &domain.SearchFilters{Chips: []string{"hazmat"}}, "IN")
+		m, _, err = s.Map(ctx, &domain.SearchFilters{Chips: []string{"hazmat"}}, "IN", false)
 		if err != nil || m.Total != 3 {
 			t.Errorf("hazmat map = %d %v", m.Total, err)
 		}
-		m, _, _ = s.Map(ctx, &domain.SearchFilters{Location: near(), AutoExpand: new(bool)}, "IN")
+		m, _, _ = s.Map(ctx, &domain.SearchFilters{Location: near(), AutoExpand: new(bool)}, "IN", false)
 		if m.Total != 2 {
 			t.Errorf("25 km map = %d", m.Total)
 		}

@@ -3,6 +3,8 @@ package domain
 import (
 	"context"
 	"time"
+
+	"github.com/atharva-ng/crunch/internal/models"
 )
 
 // Structured search (spec 04). AI search (05) produces the same
@@ -59,6 +61,9 @@ type SearchFilters struct {
 	// Ranges filter numeric fields by full path ("node.field"), canonical
 	// units. On a range field, min means "max ≥ min" and max "min ≤ max".
 	Ranges map[string]MinMax `json:"ranges,omitempty"`
+	// IncludeArchived adds archived warehouses (admin search only; the
+	// public search ignores it).
+	IncludeArchived bool `json:"includeArchived,omitempty"`
 	// Text is the raw NL query (05: logging / fallback).
 	Text string `json:"text,omitempty"`
 	// SessionID is the visitor's anonymous session, carried to analytics
@@ -161,6 +166,15 @@ type SearchCard struct {
 	// Unverified: matched only through the include-unverified path (D-035).
 	Unverified bool   `json:"unverified"`
 	CoverURL   string `json:"coverUrl,omitempty"`
+
+	// Admin search only (never set on public results): the warehouse id
+	// and status, and its search projection so the admin table can show
+	// each filtered attribute's value, staff-only ones included.
+	ID     string           `json:"id,omitempty"`
+	Status string           `json:"status,omitempty"`
+	Chips  []string         `json:"chips,omitempty"`
+	Nums   []models.NumFact `json:"nums,omitempty"`
+	Unk    []string         `json:"unk,omitempty"`
 }
 
 // SearchFacets are counts / bounds within the current results.

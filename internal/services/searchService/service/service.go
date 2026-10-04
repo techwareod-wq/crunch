@@ -74,7 +74,8 @@ func (s *svc) Search(ctx context.Context, f domain.SearchFilters, v searchServic
 		v.SessionID = f.SessionID
 	}
 	cfg := s.cfg()
-	n, q, dropped, err := normalize(s.rules.Snapshot(), f, cfg)
+	snap := s.rules.Snapshot()
+	n, q, dropped, err := normalize(snap, f, cfg, v.Admin)
 	if err != nil {
 		return domain.SearchResponse{}, err
 	}
@@ -107,13 +108,17 @@ func (s *svc) Search(ctx context.Context, f domain.SearchFilters, v searchServic
 	resp.Applied.Filters = n
 	resp.Total = res.Total
 	for _, h := range res.Hits {
-		resp.Results = append(resp.Results, s.card(h, n, q))
+		c := s.card(h, n, q)
+		if v.Admin {
+			c.ID, c.Status, c.Chips, c.Nums, c.Unk = h.ID.Hex(), h.Status, h.Chips, h.Nums, h.Unk
+		}
+		resp.Results = append(resp.Results, c)
 	}
-	resp.Facets = facets(res)
+	resp.Facets = facets(res, snap, v.Admin)
 	if resp.Radius != nil && resp.Radius.Exhausted && res.Total == 0 {
 		resp.Radius.Message = fmt.Sprintf("No warehouses within %d km.", resp.Radius.UsedKm)
 	}
-	if !v.Quiet {
+	if !v.Quiet && !v.Admin {
 		s.logSearch(resp, v, s.now().Sub(start).Milliseconds())
 	}
 	return resp, nil
@@ -292,9 +297,16 @@ func groupThousands(v float64) string {
 	return b.String()
 }
 
-// facets turns the raw facet counts into the response shape.
-func facets(res models.SearchResult) domain.SearchFacets {
-	f := domain.SearchFacets{Chips: res.ChipCounts, Industries: map[string]domain.IndustryCount{}, Ranges: map[string]domain.Bounds{}}
+// facets turns the raw facet counts into the response shape. The projection
+// holds every attribute, so public search keeps only the counts of public +
+// filterable chips and ranges (no staff-only leak); admin keeps all.
+func facets(res models.SearchResult, snap *domain.Snapshot, admin bool) domain.SearchFacets {
+	f := domain.SearchFacets{Chips: map[string]int64{}, Industries: map[string]domain.IndustryCount{}, Ranges: map[string]domain.Bounds{}}
+	for k, n := range res.ChipCounts {
+		if _, ok := chipUnk(snap, k, admin); ok {
+			f.Chips[k] = n
+		}
+	}
 	for k, n := range res.FitCounts {
 		ind, verdict, _ := strings.Cut(k, ":")
 		c := f.Industries[ind]
@@ -309,6 +321,9 @@ func facets(res models.SearchResult) domain.SearchFacets {
 		f.Industries[ind] = c
 	}
 	for k, b := range res.NumStats {
+		if !admin && !publicNum(snap, k) {
+			continue
+		}
 		f.Ranges[k] = domain.Bounds{Min: b[0], Max: b[1]}
 	}
 	if res.Price != nil {
@@ -318,6 +333,18 @@ func facets(res models.SearchResult) domain.SearchFacets {
 		f.Area = &domain.Bounds{Min: res.Area[0], Max: res.Area[1]}
 	}
 	return f
+}
+
+// publicNum reports whether a `nums` key ("node.field", or a range field's
+// "node.field_min" / "_max") belongs to a public + filterable field. The
+// root's total area counts: it is the public area filter.
+func publicNum(snap *domain.Snapshot, k string) bool {
+	for _, path := range []string{k, strings.TrimSuffix(k, "_min"), strings.TrimSuffix(k, "_max")} {
+		if n, f, ok := snap.Field(path); ok && n.Public && f.Public && f.Filterable {
+			return true
+		}
+	}
+	return false
 }
 
 // logSearch hands page 1 of a search to analytics in the background

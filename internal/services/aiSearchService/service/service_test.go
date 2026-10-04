@@ -53,10 +53,10 @@ func (f *fakeSearch) Search(_ context.Context, fl domain.SearchFilters, v search
 	return domain.SearchResponse{SearchID: "s1", Results: f.results, Total: f.total, Page: max(fl.Page, 1),
 		Applied: domain.SearchApplied{Filters: fl}, Degraded: []string{}}, nil
 }
-func (f *fakeSearch) Map(context.Context, *domain.SearchFilters, string) (sdto.MapResponse, string, error) {
+func (f *fakeSearch) Map(context.Context, *domain.SearchFilters, string, bool) (sdto.MapResponse, string, error) {
 	return sdto.MapResponse{}, "", nil
 }
-func (f *fakeSearch) Catalog(string) (sdto.PublicCatalog, string) {
+func (f *fakeSearch) Catalog(string, bool) (sdto.PublicCatalog, string) {
 	return sdto.PublicCatalog{RulesVersion: 7,
 		ChipRows:   []sdto.ChipRow{{Row: "Storage", Chips: []sdto.Chip{{Key: "cold_storage", Label: "Cold storage"}, {Key: "cold_storage.temp_type:frozen", Label: "Frozen"}}}},
 		Ranges:     []sdto.RangeFilter{{Key: "cold_storage.temperature", Label: "Cold storage · Temperature", Type: "number", Unit: "C"}},

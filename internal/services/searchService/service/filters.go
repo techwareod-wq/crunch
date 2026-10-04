@@ -15,10 +15,14 @@ var sorts = []string{domain.SortRelevance, domain.SortDistance, domain.SortPrice
 // normalize validates f against the tree and config and returns the
 // filters as applied, the base query and the dropped keys. Unknown chip /
 // range / industry keys are dropped (spec 04 Validation); malformed values
-// are a ValidationError.
-func normalize(snap *domain.Snapshot, f domain.SearchFilters, cfg config.SearchValues) (domain.SearchFilters, models.SearchQuery, []string, error) {
+// are a ValidationError. admin: every attribute is queryable (not just
+// public + filterable) and includeArchived is honoured.
+func normalize(snap *domain.Snapshot, f domain.SearchFilters, cfg config.SearchValues, admin bool) (domain.SearchFilters, models.SearchQuery, []string, error) {
 	n := f
 	n.SessionID = "" // analytics only (Viewer.SessionID)
+	if !admin {
+		n.IncludeArchived = false
+	}
 	dropped := []string{}
 	country := "IN"
 	if f.Location != nil {
@@ -39,6 +43,9 @@ func normalize(snap *domain.Snapshot, f domain.SearchFilters, cfg config.SearchV
 		}
 	}
 	q := models.SearchQuery{Country: country, IncludeUnverified: f.IncludeUnverified}
+	if n.IncludeArchived {
+		q.Statuses = []string{models.WarehouseLive, models.WarehouseArchived}
+	}
 
 	// Radius: default per country, capped at the last ring.
 	steps := radiusSteps(cfg)
@@ -116,7 +123,7 @@ func normalize(snap *domain.Snapshot, f domain.SearchFilters, cfg config.SearchV
 	n.Chips = nil
 	for _, c := range f.Chips {
 		c = strings.TrimSpace(c)
-		unk, ok := chipUnk(snap, c)
+		unk, ok := chipUnk(snap, c, admin)
 		if !ok {
 			dropped = append(dropped, "chip:"+c)
 			continue
@@ -142,7 +149,7 @@ func normalize(snap *domain.Snapshot, f domain.SearchFilters, cfg config.SearchV
 		if err := checkMinMax("ranges."+k, mm, true); err != nil {
 			return n, q, nil, err
 		}
-		r, ok := rangeQuery(snap, k, mm)
+		r, ok := rangeQuery(snap, k, mm, admin)
 		if !ok {
 			dropped = append(dropped, "range:"+k)
 			continue
@@ -168,21 +175,21 @@ func checkMinMax(name string, m domain.MinMax, allowNegative bool) error {
 	return nil
 }
 
-// chipUnk checks a chip against the tree (public + filterable, spec 02
-// Projection format) and returns the `unk` keys meaning "unknown" for it:
-// the field path (if any) and the node.
-func chipUnk(snap *domain.Snapshot, chip string) ([]string, bool) {
+// chipUnk checks a chip against the tree (spec 02 Projection format) and
+// returns the `unk` keys meaning "unknown" for it: the field path (if any)
+// and the node. Public search takes public + filterable only; admin any.
+func chipUnk(snap *domain.Snapshot, chip string, admin bool) ([]string, bool) {
 	path, opt, hasOpt := strings.Cut(chip, ":")
 	nodeKey, fieldKey, isField := strings.Cut(path, ".")
 	n, ok := snap.Node(nodeKey)
-	if !ok || n.Key == domain.RootKey || !n.Public {
+	if !ok || n.Key == domain.RootKey || (!admin && !n.Public) {
 		return nil, false
 	}
 	if !isField {
-		return []string{nodeKey}, !hasOpt && n.Filterable
+		return []string{nodeKey}, !hasOpt && (admin || n.Filterable)
 	}
 	f, ok := n.Field(fieldKey)
-	if !ok || !f.Public || !f.Filterable {
+	if !ok || (!admin && (!f.Public || !f.Filterable)) {
 		return nil, false
 	}
 	switch {
@@ -196,10 +203,11 @@ func chipUnk(snap *domain.Snapshot, chip string) ([]string, bool) {
 
 // rangeQuery maps a range filter on a numeric field to `nums` conditions.
 // A range-typed field stores <path>_min / <path>_max: min ⇒ its max ≥ min,
-// max ⇒ its min ≤ max ("can reach", 02).
-func rangeQuery(snap *domain.Snapshot, path string, mm domain.MinMax) (models.SearchRange, bool) {
+// max ⇒ its min ≤ max ("can reach", 02). Public search takes public +
+// filterable fields only; admin any.
+func rangeQuery(snap *domain.Snapshot, path string, mm domain.MinMax, admin bool) (models.SearchRange, bool) {
 	n, f, ok := snap.Field(path)
-	if !ok || n.Key == domain.RootKey || !n.Public || !f.Public || !f.Filterable {
+	if !ok || n.Key == domain.RootKey || (!admin && (!n.Public || !f.Public || !f.Filterable)) {
 		return models.SearchRange{}, false
 	}
 	r := models.SearchRange{Unk: []string{path, n.Key}}

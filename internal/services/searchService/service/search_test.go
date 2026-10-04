@@ -9,8 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"go.mongodb.org/mongo-driver/bson/primitive"
+
 	"github.com/atharva-ng/crunch/internal/models"
 	"github.com/atharva-ng/crunch/internal/services/searchService"
+	"github.com/atharva-ng/crunch/internal/services/searchService/dto"
 	"github.com/atharva-ng/crunch/internal/warehousehub/domain"
 )
 
@@ -33,7 +36,7 @@ func TestNormalize(t *testing.T) {
 		Price: &domain.PriceFilter{PerSqmMonthMax: fp(500)},
 		Limit: 500,
 	}
-	n, q, dropped, err := normalize(snap, in, cfg)
+	n, q, dropped, err := normalize(snap, in, cfg, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,12 +83,12 @@ func TestNormalize(t *testing.T) {
 		"range order": {Ranges: map[string]domain.MinMax{"cold_storage.temperature": {Min: fp(5), Max: fp(1)}}},
 	} {
 		var ve *searchService.ValidationError
-		if _, _, _, err := normalize(snap, bad, cfg); !errors.As(err, &ve) {
+		if _, _, _, err := normalize(snap, bad, cfg, false); !errors.As(err, &ve) {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
 	// No location: relevance; empty location object is dropped.
-	n, _, _, _ = normalize(snap, domain.SearchFilters{Location: &domain.SearchLocation{Country: "IN"}}, cfg)
+	n, _, _, _ = normalize(snap, domain.SearchFilters{Location: &domain.SearchLocation{Country: "IN"}}, cfg, false)
 	if n.Location != nil || n.Sort != domain.SortRelevance || n.RadiusKm != 25 {
 		t.Errorf("no-location defaults = %+v", n)
 	}
@@ -256,7 +259,7 @@ func TestMapBandsAndCache(t *testing.T) {
 	}
 	h.store.points = []models.MapPoint{pt("a", 18, 73, 100), pt("b", 19, 72, 200), pt("c", 20, 74, 300), pt("d", 17, 75, 0)}
 	h.store.catalogV = 4
-	resp, etag, err := h.svc.Map(ctx, nil, "in")
+	resp, etag, err := h.svc.Map(ctx, nil, "in", false)
 	if err != nil || etag != `"map-IN-4"` || resp.Total != 4 {
 		t.Fatalf("%+v %q %v", resp, etag, err)
 	}
@@ -267,24 +270,48 @@ func TestMapBandsAndCache(t *testing.T) {
 	if !slices.Equal(resp.BBox, []float64{72, 17, 75, 20}) {
 		t.Errorf("bbox = %v", resp.BBox)
 	}
-	h.svc.Map(ctx, nil, "IN")
+	h.svc.Map(ctx, nil, "IN", false)
 	if h.store.mapCalls != 1 {
 		t.Errorf("country view not cached: %d calls", h.store.mapCalls)
 	}
 	h.store.catalogV = 5
-	if _, etag, _ := h.svc.Map(ctx, nil, "IN"); etag != `"map-IN-5"` || h.store.mapCalls != 2 {
+	if _, etag, _ := h.svc.Map(ctx, nil, "IN", false); etag != `"map-IN-5"` || h.store.mapCalls != 2 {
 		t.Errorf("cache not invalidated: %q %d", etag, h.store.mapCalls)
 	}
 	// Filtered maps are never cached and carry no etag.
-	if _, etag, _ := h.svc.Map(ctx, &domain.SearchFilters{}, "IN"); etag != "" || h.store.mapCalls != 3 {
+	if _, etag, _ := h.svc.Map(ctx, &domain.SearchFilters{}, "IN", false); etag != "" || h.store.mapCalls != 3 {
 		t.Errorf("filtered = %q %d", etag, h.store.mapCalls)
+	}
+}
+
+// The admin map skips the country cache, takes staff-only filters and
+// links each point to its warehouse.
+func TestAdminMap(t *testing.T) {
+	h := newHarness()
+	id := primitive.NewObjectID()
+	h.store.points = []models.MapPoint{{ID: id, Status: models.WarehouseArchived, ShortID: "a", Loc: *domain.NewGeoPoint(19, 73)}}
+	resp, etag, err := h.svc.Map(ctx, nil, "IN", true)
+	if err != nil || etag != "" || h.store.mapCalls != 1 {
+		t.Fatalf("%+v %q %v calls %d", resp, etag, err, h.store.mapCalls)
+	}
+	if len(resp.AdminPoints) != 1 || resp.AdminPoints[0].ID != id.Hex() || resp.AdminPoints[0].Status != models.WarehouseArchived {
+		t.Errorf("admin points = %+v", resp.AdminPoints)
+	}
+	if _, _, err := h.svc.Map(ctx, &domain.SearchFilters{Chips: []string{"internal"}, IncludeArchived: true}, "IN", true); err != nil {
+		t.Fatal(err)
+	}
+	if q := h.store.mapQueries[len(h.store.mapQueries)-1]; len(q.Chips) != 1 || len(q.Statuses) != 2 {
+		t.Errorf("admin map query = %+v", q)
+	}
+	if pub, _, _ := h.svc.Map(ctx, &domain.SearchFilters{}, "IN", false); pub.AdminPoints != nil {
+		t.Errorf("public map leaks admin points: %+v", pub.AdminPoints)
 	}
 }
 
 func TestCatalog(t *testing.T) {
 	h := newHarness()
-	c, etag := h.svc.Catalog("")
-	if etag != `"catalog-IN-7"` || c.Currency != "INR" || c.DefaultRadiusKm != 25 {
+	c, etag := h.svc.Catalog("", false)
+	if etag != `"catalog-public-IN-7"` || c.Currency != "INR" || c.DefaultRadiusKm != 25 {
 		t.Errorf("header = %+v %q", c, etag)
 	}
 	if len(c.ChipRows) != 2 || c.ChipRows[0].Row != "Storage" || c.ChipRows[1].Row != "Features" {
@@ -310,6 +337,142 @@ func TestCatalog(t *testing.T) {
 	}
 	if len(c.Industries) != 2 || c.Industries[0].Key != "food" {
 		t.Errorf("industries = %+v", c.Industries)
+	}
+}
+
+// Admin search takes every attribute (staff-only, non-filterable) but
+// still drops the root, non-projectable and unknown keys; includeArchived
+// only counts for admin.
+func TestNormalizeAdmin(t *testing.T) {
+	snap, cfg := testSnapshot(), testConfig()
+	in := domain.SearchFilters{
+		Chips:           []string{"internal", "cold_storage.audited", "warehouse", "ghost"},
+		Ranges:          map[string]domain.MinMax{"cold_storage.notes": {Min: fp(1)}, "cold_storage.temperature": {Max: fp(5)}},
+		IncludeArchived: true,
+	}
+	n, q, dropped, err := normalize(snap, in, cfg, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(n.Chips, []string{"internal", "cold_storage.audited"}) || len(q.Ranges) != 1 {
+		t.Errorf("chips = %v ranges = %+v", n.Chips, q.Ranges)
+	}
+	if !slices.Equal(dropped, []string{"chip:warehouse", "chip:ghost", "range:cold_storage.notes"}) {
+		t.Errorf("dropped = %v", dropped)
+	}
+	if !n.IncludeArchived || !slices.Equal(q.Statuses, []string{models.WarehouseLive, models.WarehouseArchived}) {
+		t.Errorf("archived: %v %v", n.IncludeArchived, q.Statuses)
+	}
+
+	n, q, dropped, _ = normalize(snap, in, cfg, false)
+	if len(n.Chips) != 0 || n.IncludeArchived || q.Statuses != nil || !slices.Contains(dropped, "chip:internal") {
+		t.Errorf("public: chips %v archived %v statuses %v dropped %v", n.Chips, n.IncludeArchived, q.Statuses, dropped)
+	}
+}
+
+// The projection holds staff-only attributes: public facets must drop them,
+// admin facets and cards keep them.
+func TestSearchStaffOnlyScope(t *testing.T) {
+	h := newHarness()
+	id := primitive.NewObjectID()
+	hit := models.SearchHit{ID: id, Status: models.WarehouseArchived, ShortID: "abc", Chips: []string{"cold_storage", "internal", "cold_storage.audited"},
+		Nums: []models.NumFact{{K: "cold_storage.temp_range_min", V: 2}}, Unk: []string{"hazmat"}}
+	h.store.result = models.SearchResult{Total: 1, Hits: []models.SearchHit{hit},
+		ChipCounts: map[string]int64{"cold_storage": 1, "internal": 1, "cold_storage.audited": 1},
+		NumStats: map[string][2]float64{"cold_storage.temp_range_min": {2, 2}, "warehouse.total_area": {900, 900},
+			"internal.cost": {1, 1}}}
+
+	pub, err := h.svc.Search(ctx, domain.SearchFilters{}, searchService.Viewer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pub.Facets.Chips) != 1 || pub.Facets.Chips["cold_storage"] != 1 {
+		t.Errorf("public chip facets = %v", pub.Facets.Chips)
+	}
+	if _, ok := pub.Facets.Ranges["internal.cost"]; ok || len(pub.Facets.Ranges) != 2 {
+		t.Errorf("public range facets = %v", pub.Facets.Ranges)
+	}
+	if c := pub.Results[0]; c.ID != "" || c.Status != "" || c.Chips != nil || c.Nums != nil || c.Unk != nil {
+		t.Errorf("public card leaks admin fields: %+v", c)
+	}
+
+	adm, err := h.svc.Search(ctx, domain.SearchFilters{}, searchService.Viewer{Admin: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(adm.Facets.Chips) != 3 || len(adm.Facets.Ranges) != 3 {
+		t.Errorf("admin facets = %v %v", adm.Facets.Chips, adm.Facets.Ranges)
+	}
+	c := adm.Results[0]
+	if c.ID != id.Hex() || c.Status != models.WarehouseArchived || !slices.Equal(c.Chips, hit.Chips) || len(c.Nums) != 1 || !slices.Equal(c.Unk, hit.Unk) {
+		t.Errorf("admin card = %+v", c)
+	}
+}
+
+func TestCatalogAdmin(t *testing.T) {
+	h := newHarness()
+	fieldsOf := func(g dto.FilterGroup) map[string]dto.FilterField {
+		m := map[string]dto.FilterField{}
+		for _, f := range g.Fields {
+			m[f.Key] = f
+		}
+		return m
+	}
+	groupsOf := func(c dto.PublicCatalog) map[string]dto.FilterGroup {
+		m := map[string]dto.FilterGroup{}
+		for _, g := range c.Groups {
+			m[g.Key] = g
+		}
+		return m
+	}
+
+	pub, _ := h.svc.Catalog("", false)
+	pg := groupsOf(pub)
+	if _, ok := pg["internal"]; ok || len(pg) != 2 {
+		t.Fatalf("public groups = %+v", pub.Groups)
+	}
+	pf := fieldsOf(pg["cold_storage"])
+	// audited isn't filterable, notes isn't projectable.
+	if len(pf) != 3 || pf["cold_storage.temp_range"].Unit != "C" || len(pf["cold_storage.temp_type"].Options) != 2 {
+		t.Errorf("public fields = %+v", pf)
+	}
+	if o := pf["cold_storage.temp_type"].Options; o[0].Key != "cold_storage.temp_type:chilled" {
+		t.Errorf("pick options = %+v", o)
+	}
+
+	adm, etag := h.svc.Catalog("", true)
+	ag := groupsOf(adm)
+	if etag != `"catalog-admin-IN-7"` || len(ag) != 3 {
+		t.Fatalf("admin groups = %+v %q", adm.Groups, etag)
+	}
+	if g := ag["internal"]; g.Public || !g.Selectable {
+		t.Errorf("staff-only group = %+v", g)
+	}
+	af := fieldsOf(ag["cold_storage"])
+	if _, ok := af["cold_storage.audited"]; !ok || len(af) != 4 {
+		t.Errorf("admin fields = %+v", af)
+	}
+}
+
+// A nested node lists its parents (nearest first, root excluded) so the
+// filter picker can treat them as implied.
+func TestCatalogAncestors(t *testing.T) {
+	h := newHarness()
+	cold := models.AttributeNode{Key: "cold_storage", ParentKey: domain.RootKey, Name: "Cold storage", Public: true, Filterable: true}
+	ctl := models.AttributeNode{Key: "temp_control", ParentKey: "cold_storage", Name: "Temperature control", Public: true, Filterable: true}
+	probe := models.AttributeNode{Key: "probe", ParentKey: "temp_control", Name: "Probe", Public: true, Filterable: true}
+	h.svc.rules = staticRules{domain.NewSnapshot(1, []models.AttributeNode{domain.RootNode(), cold, ctl, probe}, nil)}
+	c, _ := h.svc.Catalog("", false)
+	got := map[string][]string{}
+	parent := map[string]string{}
+	for _, g := range c.Groups {
+		got[g.Key], parent[g.Key] = g.Ancestors, g.ParentName
+	}
+	if len(got["cold_storage"]) != 0 || !slices.Equal(got["temp_control"], []string{"cold_storage"}) || !slices.Equal(got["probe"], []string{"temp_control", "cold_storage"}) {
+		t.Errorf("ancestors = %v", got)
+	}
+	if parent["probe"] != "Temperature control" || parent["cold_storage"] != "" {
+		t.Errorf("parent names = %v", parent)
 	}
 }
 

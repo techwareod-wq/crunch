@@ -11,6 +11,7 @@ import (
 
 // Handle registers the public search routes (spec 04): no rate limit
 // (D-018); every route needs sign-in plus the search feature (WithFeature).
+// The /v1/admin/search routes are staff-only.
 func Handle(appCtx *config.AppContext) {
 	middleware.Handle("/v1/public/search", http.HandlerFunc(HandleSearch)).
 		WithFeature(authz.FeatureSearch).
@@ -31,6 +32,31 @@ func Handle(appCtx *config.AppContext) {
 
 	middleware.Handle("/v1/public/catalog", http.HandlerFunc(HandleCatalog)).
 		WithFeature(authz.FeatureSearch).
+		WithJWTAuthentication().
+		WithMethods(http.MethodGet).
+		With(appCtx.Middleware()).
+		AllowCORS().
+		WithLogEnabled()
+
+	middleware.Handle("/v1/admin/search", http.HandlerFunc(HandleAdminSearch)).
+		WithAdminAuthorization().
+		WithJWTAuthentication().
+		With(middleware.DeserializeJson[domain.SearchFilters]()).
+		WithMethods(http.MethodPost).
+		With(appCtx.Middleware()).
+		AllowCORS().
+		WithLogEnabled()
+
+	middleware.Handle("/v1/admin/search/map", http.HandlerFunc(HandleAdminMap)).
+		WithAdminAuthorization().
+		WithJWTAuthentication().
+		WithMethods(http.MethodGet).
+		With(appCtx.Middleware()).
+		AllowCORS().
+		WithLogEnabled()
+
+	middleware.Handle("/v1/admin/search/catalog", http.HandlerFunc(HandleAdminCatalog)).
+		WithAdminAuthorization().
 		WithJWTAuthentication().
 		WithMethods(http.MethodGet).
 		With(appCtx.Middleware()).

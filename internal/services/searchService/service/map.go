@@ -15,20 +15,24 @@ import (
 // Map returns every matching pin (D-077). The unfiltered country view is
 // cached per catalogVersion (bumped on publish / unpublish) and carries an
 // ETag. With a location, pins are limited to the ring a search would use.
-func (s *svc) Map(ctx context.Context, f *domain.SearchFilters, country string) (dto.MapResponse, string, error) {
+// The admin map is never cached and adds each point's id and status.
+func (s *svc) Map(ctx context.Context, f *domain.SearchFilters, country string, admin bool) (dto.MapResponse, string, error) {
 	country = strings.ToUpper(strings.TrimSpace(country))
 	if country == "" {
 		country = "IN"
 	}
-	if f == nil {
+	if f == nil && !admin {
 		return s.countryMap(ctx, country)
+	}
+	if f == nil {
+		f = &domain.SearchFilters{}
 	}
 	if f.Location == nil {
 		f.Location = &domain.SearchLocation{Country: country}
 	} else if f.Location.Country == "" {
 		f.Location.Country = country
 	}
-	n, q, _, err := normalize(s.rules.Snapshot(), *f, s.cfg())
+	n, q, _, err := normalize(s.rules.Snapshot(), *f, s.cfg(), admin)
 	if err != nil {
 		return dto.MapResponse{}, "", err
 	}
@@ -46,7 +50,14 @@ func (s *svc) Map(ctx context.Context, f *domain.SearchFilters, country string) 
 	if err != nil {
 		return dto.MapResponse{}, "", err
 	}
-	return buildMap(pts), "", nil
+	out := buildMap(pts)
+	if admin {
+		out.AdminPoints = make([]dto.AdminMapPoint, 0, len(pts))
+		for _, p := range pts {
+			out.AdminPoints = append(out.AdminPoints, dto.AdminMapPoint{ID: p.ID.Hex(), Status: p.Status})
+		}
+	}
+	return out, "", nil
 }
 
 func (s *svc) countryMap(ctx context.Context, country string) (dto.MapResponse, string, error) {

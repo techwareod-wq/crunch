@@ -44,6 +44,7 @@ func TestSearchMatch(t *testing.T) {
 			[]string{`{"fit":{"$in":["pharma:F","pharma:P"]}}`, `{"fit":{"$in":["food:F","food:P"]}}`}, []string{":U"}},
 		{"industries + unverified", SearchQuery{Industries: []string{"pharma"}, IncludeUnverified: true}, []string{`"pharma:U"`}, nil},
 		{"exclude", SearchQuery{Exclude: primitive.NewObjectID()}, []string{`"_id":{"$ne"`}, nil},
+		{"statuses widen", SearchQuery{Statuses: []string{WarehouseLive, WarehouseArchived}}, []string{`"status":{"$in":["live","archived"]}`}, nil},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -89,7 +89,7 @@ func HandleMap(w http.ResponseWriter, r *http.Request) {
 		}
 		f = &parsed
 	}
-	resp, etag, err := service(r).Map(r.Context(), f, q.Get("country"))
+	resp, etag, err := service(r).Map(r.Context(), f, q.Get("country"), false)
 	if err != nil {
 		sendErr(w, r, err)
 		return
@@ -97,8 +97,54 @@ func HandleMap(w http.ResponseWriter, r *http.Request) {
 	sendCached(w, r, etag, resp)
 }
 
+// HandleAdminMap: like HandleMap in the staff scope (any attribute,
+// includeArchived honoured); points carry warehouse id + status.
+func HandleAdminMap(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	var f *domain.SearchFilters
+	if raw := strings.TrimSpace(q.Get("filters")); raw != "" {
+		var parsed domain.SearchFilters
+		if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+			badRequest(w, r, "filters must be a JSON search filter object")
+			return
+		}
+		f = &parsed
+	}
+	resp, _, err := service(r).Map(r.Context(), f, q.Get("country"), true)
+	if err != nil {
+		sendErr(w, r, err)
+		return
+	}
+	middleware.SendJSONResponse(w, r, http.StatusOK, resp)
+}
+
 func HandleCatalog(w http.ResponseWriter, r *http.Request) {
-	resp, etag := service(r).Catalog(r.URL.Query().Get("country"))
+	resp, etag := service(r).Catalog(r.URL.Query().Get("country"), false)
+	sendCached(w, r, etag, resp)
+}
+
+// HandleAdminSearch is the staff search: every attribute is queryable,
+// archived listings on request, cards carry id / status / projection.
+func HandleAdminSearch(w http.ResponseWriter, r *http.Request) {
+	f, ok := r.Context().Value(middleware.DeserializerContextKey).(domain.SearchFilters)
+	if !ok {
+		middleware.SendJSONError(w, r, apperrors.ErrInvalidRequestBody)
+		return
+	}
+	v := viewerOf(r)
+	v.Admin = true
+	resp, err := service(r).Search(r.Context(), f, v)
+	if err != nil {
+		sendErr(w, r, err)
+		return
+	}
+	middleware.SendJSONResponse(w, r, http.StatusOK, resp)
+}
+
+// HandleAdminCatalog is the staff filter catalog: every attribute, with
+// public flags so the UI can mark staff-only ones.
+func HandleAdminCatalog(w http.ResponseWriter, r *http.Request) {
+	resp, etag := service(r).Catalog(r.URL.Query().Get("country"), true)
 	sendCached(w, r, etag, resp)
 }
 

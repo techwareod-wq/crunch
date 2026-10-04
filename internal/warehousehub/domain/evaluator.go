@@ -63,17 +63,17 @@ func Evaluate(s *Snapshot, a models.Attributes, now time.Time) Result {
 		FitRulesVersion: s.Version, EvaluatedAt: now,
 	}
 
-	// 3 + 6. Needs-info and the chip/num projection, in tree order.
+	// 3 + 6. Needs-info and the chip/num projection, in tree order. Every
+	// node and field is projected: public / filterable are applied when
+	// searching, so admin search can query staff-only attributes.
 	for i := range s.Nodes {
 		n := &s.Nodes[i]
 		switch e.eff[n.Key] {
 		case StatusUnknown:
 			res.UnknownNodes = append(res.UnknownNodes, n.Key)
-			if nodeSearchable(n) {
-				proj.Unk = append(proj.Unk, n.Key)
-			}
+			proj.Unk = append(proj.Unk, n.Key)
 		case StatusYes:
-			if n.Key != RootKey && n.Public && n.Filterable {
+			if n.Key != RootKey {
 				proj.Chips = append(proj.Chips, n.Key)
 			}
 			for j := range n.Fields {
@@ -84,7 +84,7 @@ func Evaluate(s *Snapshot, a models.Attributes, now time.Time) Result {
 				if missing && f.Required {
 					res.MissingRequired = append(res.MissingRequired, path)
 				}
-				if !n.Public || !f.Public || !f.Filterable {
+				if !Projectable(f.Type) {
 					continue
 				}
 				switch {
@@ -112,18 +112,12 @@ func Evaluate(s *Snapshot, a models.Attributes, now time.Time) Result {
 	return res
 }
 
-// nodeSearchable: the node itself is a chip, or one of its fields is.
-func nodeSearchable(n *models.AttributeNode) bool {
-	if !n.Public {
-		return false
-	}
-	if n.Filterable {
+// Projectable reports whether a field of type t lands in the search
+// projection (chips or nums).
+func Projectable(t models.FieldType) bool {
+	switch t {
+	case TypeBool, TypePick, TypeMulti, TypeNumber, TypeArea, TypeRatio, TypeRange:
 		return true
-	}
-	for i := range n.Fields {
-		if n.Fields[i].Public && n.Fields[i].Filterable {
-			return true
-		}
 	}
 	return false
 }

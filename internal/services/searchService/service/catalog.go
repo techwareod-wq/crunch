@@ -13,12 +13,13 @@ import (
 // defaultRow names chips whose node / field has no filterRow.
 const defaultRow = "Features"
 
-// Catalog lists what the public filters can be built from (spec 04): chip
-// rows (public + filterable nodes, bool fields and pick/multi options,
-// grouped by filterRow), numeric range filters in canonical units,
-// industries, radius steps. The root's fields are left out: area and price
-// have their own filters.
-func (s *svc) Catalog(country string) (dto.PublicCatalog, string) {
+// Catalog lists what the filters can be built from (spec 04): chip rows
+// (nodes, bool fields and pick/multi options, grouped by filterRow),
+// numeric range filters in canonical units, the same by attribute (groups),
+// industries, radius steps. Public: public + filterable only; admin: every
+// node and projectable field. The root's fields are left out: area and
+// price have their own filters.
+func (s *svc) Catalog(country string, admin bool) (dto.PublicCatalog, string) {
 	country = strings.ToUpper(strings.TrimSpace(country))
 	if country == "" {
 		country = "IN"
@@ -28,7 +29,7 @@ func (s *svc) Catalog(country string) (dto.PublicCatalog, string) {
 	out := dto.PublicCatalog{
 		RulesVersion: snap.Version, Country: country, Currency: cfg.CurrencyFor(country),
 		DefaultRadiusKm: cfg.RadiusFor(country), RadiusSteps: radiusSteps(cfg),
-		ChipRows: []dto.ChipRow{}, Ranges: []dto.RangeFilter{}, Industries: []dto.IndustryItem{},
+		ChipRows: []dto.ChipRow{}, Ranges: []dto.RangeFilter{}, Groups: []dto.FilterGroup{}, Industries: []dto.IndustryItem{},
 	}
 
 	type placed struct {
@@ -52,15 +53,22 @@ func (s *svc) Catalog(country string) (dto.PublicCatalog, string) {
 
 	for i := range snap.Nodes {
 		n := &snap.Nodes[i]
-		if n.Key == domain.RootKey || !n.Public {
+		if n.Key == domain.RootKey || (!admin && !n.Public) {
 			continue
 		}
-		if n.Filterable {
+		g := dto.FilterGroup{Key: n.Key, Name: n.Name, Selectable: admin || n.Filterable, Public: n.Public, Ancestors: []string{}, Fields: []dto.FilterField{}}
+		for p, ok := snap.Node(n.ParentKey); ok && p.Key != domain.RootKey; p, ok = snap.Node(p.ParentKey) {
+			if g.ParentName == "" {
+				g.ParentName = p.Name
+			}
+			g.Ancestors = append(g.Ancestors, p.Key)
+		}
+		if g.Selectable {
 			add(n.FilterRow, n.FilterPos, dto.Chip{Key: n.Key, Label: n.Name})
 		}
 		for j := range n.Fields {
 			f := &n.Fields[j]
-			if !f.Public || !f.Filterable {
+			if !domain.Projectable(f.Type) || (!admin && (!f.Public || !f.Filterable)) {
 				continue
 			}
 			path := n.Key + "." + f.Key
@@ -68,6 +76,7 @@ func (s *svc) Catalog(country string) (dto.PublicCatalog, string) {
 			if row == "" {
 				row = n.FilterRow
 			}
+			ff := dto.FilterField{Key: path, Name: f.Name, Type: string(f.Type), Public: n.Public && f.Public}
 			switch f.Type {
 			case domain.TypeBool:
 				add(row, f.FilterPos, dto.Chip{Key: path, Label: f.Name})
@@ -75,7 +84,9 @@ func (s *svc) Catalog(country string) (dto.PublicCatalog, string) {
 				opts := slices.Clone(f.Options)
 				slices.SortStableFunc(opts, func(a, b models.FieldOption) int { return a.Order - b.Order })
 				for _, o := range opts {
-					add(row, f.FilterPos, dto.Chip{Key: path + ":" + o.Key, Label: o.Label})
+					c := dto.Chip{Key: path + ":" + o.Key, Label: o.Label}
+					add(row, f.FilterPos, c)
+					ff.Options = append(ff.Options, c)
 				}
 			case domain.TypeNumber, domain.TypeArea, domain.TypeRatio, domain.TypeRange:
 				rf := dto.RangeFilter{Key: path, Label: n.Name + " · " + f.Name, Type: string(f.Type), Row: row}
@@ -85,7 +96,12 @@ func (s *svc) Catalog(country string) (dto.PublicCatalog, string) {
 					rf.Unit = domain.UnitSqm
 				}
 				out.Ranges = append(out.Ranges, rf)
+				ff.Unit = rf.Unit
 			}
+			g.Fields = append(g.Fields, ff)
+		}
+		if g.Selectable || len(g.Fields) > 0 {
+			out.Groups = append(out.Groups, g)
 		}
 	}
 	for _, r := range rowOrder {
@@ -108,5 +124,9 @@ func (s *svc) Catalog(country string) (dto.PublicCatalog, string) {
 	for _, ind := range inds {
 		out.Industries = append(out.Industries, dto.IndustryItem{Key: ind.Key, Name: ind.Name})
 	}
-	return out, fmt.Sprintf(`"catalog-%s-%d"`, country, snap.Version)
+	scope := "public"
+	if admin {
+		scope = "admin"
+	}
+	return out, fmt.Sprintf(`"catalog-%s-%s-%d"`, scope, country, snap.Version)
 }

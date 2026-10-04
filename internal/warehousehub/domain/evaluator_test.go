@@ -176,7 +176,7 @@ func TestProjectionAndNeedsInfo(t *testing.T) {
 	r := Evaluate(s, a, now)
 	p := r.Projection
 
-	wantChips := []string{"cold_storage", "cold_storage.temp_type:frozen", "hazmat", "hazmat.dg_classes:c3", "hazmat.dg_classes:c8", "hazmat.owner_consent"}
+	wantChips := []string{"infrastructure", "cold_storage", "cold_storage.temp_type:frozen", "hazmat", "hazmat.dg_classes:c3", "hazmat.dg_classes:c8", "hazmat.owner_consent"}
 	if !slices.Equal(p.Chips, wantChips) {
 		t.Errorf("chips = %v, want %v", p.Chips, wantChips)
 	}
@@ -204,14 +204,17 @@ func TestProjectionAndNeedsInfo(t *testing.T) {
 	}
 }
 
-func TestProjectionHidesNonPublic(t *testing.T) {
+// Staff-only and non-filterable attributes are projected too: search
+// applies public / filterable at query time (admin search reads them).
+func TestProjectionKeepsStaffOnly(t *testing.T) {
 	nodes := fixtureNodes()
-	nodes[2].Public = false // cold_storage
+	nodes[2].Public, nodes[2].Filterable = false, false // cold_storage
+	nodes[2].Fields[2].Public = false                   // temp_type
 	s := NewSnapshot(1, nodes, nil)
 	r := Evaluate(s, baseAttrs(), time.Time{})
-	for _, c := range r.Projection.Chips {
-		if c == "cold_storage" || c == "cold_storage.temp_type:frozen" {
-			t.Fatalf("non-public node leaked into chips: %v", r.Projection.Chips)
+	for _, want := range []string{"cold_storage", "cold_storage.temp_type:frozen"} {
+		if !slices.Contains(r.Projection.Chips, want) {
+			t.Errorf("chips = %v, missing staff-only %q", r.Projection.Chips, want)
 		}
 	}
 }

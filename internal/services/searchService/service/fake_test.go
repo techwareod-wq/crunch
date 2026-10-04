@@ -24,11 +24,13 @@ type fakeStore struct {
 	ringReqs [][]float64
 	points   []models.MapPoint
 	mapCalls int
-	catalogV int64
-	cache    map[string]models.GeocodeCacheEntry
-	pins     map[string]models.Pincode
-	pinErr   error
-	vecErr   error
+	// mapQueries records each MapPoints query.
+	mapQueries []models.SearchQuery
+	catalogV   int64
+	cache      map[string]models.GeocodeCacheEntry
+	pins       map[string]models.Pincode
+	pinErr     error
+	vecErr     error
 }
 
 func newFakeStore() *fakeStore {
@@ -50,8 +52,9 @@ func (f *fakeStore) RingCounts(_ context.Context, _ models.GeoPoint, _ models.Se
 	return out, nil
 }
 
-func (f *fakeStore) MapPoints(context.Context, models.SearchQuery, *models.GeoPoint, float64) ([]models.MapPoint, error) {
+func (f *fakeStore) MapPoints(_ context.Context, q models.SearchQuery, _ *models.GeoPoint, _ float64) ([]models.MapPoint, error) {
 	f.mapCalls++
+	f.mapQueries = append(f.mapQueries, q)
 	return f.points, nil
 }
 

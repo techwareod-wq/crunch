@@ -20,6 +20,10 @@ type Viewer struct {
 	SessionID string
 	// Quiet skips the search log: AI search (05) logs its own, richer event.
 	Quiet bool
+	// Admin is the staff search: every attribute is queryable (staff-only
+	// and non-filterable too), archived listings on request, and cards
+	// carry the id, status and projection. Never logged.
+	Admin bool
 }
 
 // FallbackQuery bounds the similar / keyword matches.
@@ -43,11 +47,14 @@ type SearchService interface {
 	// (D-078); only malformed filters are a ValidationError.
 	Search(ctx context.Context, f domain.SearchFilters, v Viewer) (domain.SearchResponse, error)
 	// Map returns every matching pin. f nil = the unfiltered country view,
-	// cached per catalogVersion; etag is set for it (D-077).
-	Map(ctx context.Context, f *domain.SearchFilters, country string) (dto.MapResponse, string, error)
-	// Catalog is the public filter catalog (chips, ranges, industries,
-	// radius steps); etag follows rulesVersion.
-	Catalog(country string) (dto.PublicCatalog, string)
+	// cached per catalogVersion; etag is set for it (D-077). admin: the
+	// staff scope (any attribute, archived on request, never cached) with
+	// each point's warehouse id and status.
+	Map(ctx context.Context, f *domain.SearchFilters, country string, admin bool) (dto.MapResponse, string, error)
+	// Catalog is the filter catalog (chips, ranges, grouped attributes,
+	// industries, radius steps); etag follows rulesVersion. admin lists
+	// every attribute, not just public + filterable ones.
+	Catalog(country string, admin bool) (dto.PublicCatalog, string)
 	// Resolve geocodes a typed postal code / place (map centring).
 	Resolve(ctx context.Context, q, country string) (dto.GeoResolved, error)
 

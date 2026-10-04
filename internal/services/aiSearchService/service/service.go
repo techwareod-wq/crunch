@@ -169,7 +169,7 @@ func (s *svc) promptFor(snap *domain.Snapshot, country string) prompt {
 	s.promptMu.Lock()
 	defer s.promptMu.Unlock()
 	if s.prompt == nil || s.prompt.version != snap.Version {
-		cat, _ := s.search.Catalog(country)
+		cat, _ := s.search.Catalog(country, false)
 		p := buildPrompt(snap, cat)
 		s.prompt = &p
 	}
