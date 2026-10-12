@@ -1,7 +1,7 @@
 server:
   port: "3090"
   defaultDBName: "crunchDB"
-  awsRegion: "ap-south-1"
+  awsRegion: "ap-southeast-2"  # ap-south-1 is SCP-denied for this account
   # No host restriction in integration; leave empty to accept any Host.
   allowedHosts: []
 
