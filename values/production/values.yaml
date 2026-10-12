@@ -1,7 +1,7 @@
 server:
   port: "3090"
   defaultDBName: "crunchDB"
-  awsRegion: "ap-south-1"
+  awsRegion: "ap-southeast-2"  # ap-south-1 is SCP-denied for this account
   # Only requests whose Host header matches are served; direct-IP requests
   # (Host = the IP) are rejected. Loopback and /health are always allowed.
   # TODO: set to the production API host once the domain exists, e.g.

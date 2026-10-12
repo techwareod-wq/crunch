@@ -41,3 +41,6 @@ __debug_bin*
 
 # Local dev tools (ElasticMQ jar, logs)
 /.local/
+
+# Claude Code local settings
+.claude/settings.local.json

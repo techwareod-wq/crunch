@@ -2,13 +2,13 @@ name: CI/CD
 
 on:
   push:
-    branches: [main, integration]
+    branches: [master]
   pull_request:
-    branches: [main, integration]
+    branches: [master]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Never cancel a main build mid-push; superseded PR runs are safe to kill.
+  # Never cancel a master build mid-push; superseded PR runs are safe to kill.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -17,11 +17,9 @@ permissions:
 
 env:
   ECR_REPO: crunch
-  # Both branches share the ECR repo; the mutable tag tells them apart:
-  # main → :latest, integration → :integration. SHA tags are unique either way.
-  MUTABLE_TAG: ${{ github.ref_name == 'main' && 'latest' || github.ref_name }}
-  # Immutable per-build tag, prefixed by branch so each environment's ECR
-  # lifecycle rule keeps its own current + previous build (rollback target).
+  # master → :latest. The SHA tag below is the immutable rollback target.
+  MUTABLE_TAG: latest
+  # Immutable per-build tag (master-<sha>); deploys pin to it.
   BUILD_TAG: ${{ github.ref_name }}-${{ github.sha }}
 
 jobs:
@@ -44,7 +42,7 @@ jobs:
 
   build-and-push:
     name: Build & push to ECR
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/integration')
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     needs: test
     runs-on: ubuntu-latest
     steps:
@@ -79,8 +77,7 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
     env:
-      # main deploys to the production instance, integration to the integration one.
-      INSTANCE_ID: ${{ github.ref_name == 'main' && vars.EC2_INSTANCE_ID || vars.EC2_INSTANCE_ID_INTEGRATION }}
+      INSTANCE_ID: ${{ vars.EC2_INSTANCE_ID }}
     steps:
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
