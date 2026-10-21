@@ -14,6 +14,7 @@ import (
 	"github.com/atharva-ng/crunch/cmd/service/controllers/attributes"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/catalog"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/enquiries"
+	"github.com/atharva-ng/crunch/cmd/service/controllers/finder" // FINDER (remove to uninstall)
 	"github.com/atharva-ng/crunch/cmd/service/controllers/healthcheck"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/search"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/users"
@@ -115,4 +116,5 @@ func loadAppAPIs(appCtx *config.AppContext) {
 	aisearch.Handle(appCtx)
 	enquiries.Handle(appCtx)
 	analytics.Handle(appCtx)
+	finder.Handle(appCtx) // FINDER (remove to uninstall)
 }
