@@ -109,6 +109,9 @@ func (s *svc) Search(ctx context.Context, req aiSearchService.Request, v searchS
 		if errors.Is(err, context.DeadlineExceeded) {
 			ai.Notes = append(ai.Notes, "llm_timeout")
 		} else if !errors.Is(err, aiSearchService.ErrNoLLM) {
+			if note := llmFailureNote(err); note != "" {
+				ai.Notes = append(ai.Notes, note)
+			}
 			log.Warn("aisearch: extraction failed", "error", err)
 		}
 		b = fromHints(snap, q, h, loc)
@@ -148,6 +151,20 @@ func (s *svc) Search(ctx context.Context, req aiSearchService.Request, v searchS
 	ai.LatencyMs = s.now().Sub(start).Milliseconds()
 	s.logSearch(resp, ai, v)
 	return aiSearchService.Response{SearchResponse: resp, AI: ai}, nil
+}
+
+// llmFailureNote names a classified provider failure for ai.notes ("" when
+// the provider didn't classify it).
+func llmFailureNote(err error) string {
+	switch {
+	case errors.Is(err, interfaces.ErrLLMRateLimited):
+		return "llm_rate_limited"
+	case errors.Is(err, interfaces.ErrLLMUnavailable):
+		return "llm_unavailable"
+	case errors.Is(err, interfaces.ErrLLMMalformed):
+		return "llm_malformed"
+	}
+	return ""
 }
 
 // normalizeQuery undoes the request deserializer's HTML escaping ("&amp;"),

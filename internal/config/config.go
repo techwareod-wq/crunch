@@ -80,6 +80,14 @@ type LLMConfig struct {
 	AnthropicAPIKey string
 	// VoyageAPIKey enables embeddings (AI search similar matches, D-082).
 	VoyageAPIKey string
+	// AISearchProvider picks AI search's extraction LLM: "anthropic"
+	// (default) or "groq".
+	AISearchProvider string
+	// GroqAPIKey / GroqModel configure the Groq provider. GroqMode is how
+	// it makes the forced extraction call: "json" (default) or "tool".
+	GroqAPIKey string
+	GroqModel  string
+	GroqMode   string
 }
 
 type SQSConfig struct {
@@ -212,6 +220,26 @@ func (c *EnvConfig) IsDev() bool {
 func (c *AppConfig) LoadLLMConfig() {
 	c.LLM.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
 	c.LLM.VoyageAPIKey = os.Getenv("VOYAGE_API_KEY")
+
+	c.LLM.AISearchProvider = strings.ToLower(strings.TrimSpace(os.Getenv("AISEARCH_PROVIDER")))
+	if c.LLM.AISearchProvider == "" {
+		c.LLM.AISearchProvider = "anthropic"
+	}
+	c.LLM.GroqAPIKey = os.Getenv("GROQ_API_KEY")
+	c.LLM.GroqModel = strings.TrimSpace(os.Getenv("AISEARCH_GROQ_MODEL"))
+	c.LLM.GroqMode = "json"
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("AISEARCH_GROQ_MODE")), "tool") {
+		c.LLM.GroqMode = "tool"
+	}
+
+	// AISEARCH_TIMEOUT_MS overrides warehousehub.aisearch.llmDeadlineMillis.
+	if raw := strings.TrimSpace(os.Getenv("AISEARCH_TIMEOUT_MS")); raw != "" {
+		if ms, err := strconv.Atoi(raw); err == nil && ms > 0 {
+			c.Values.WarehouseHub.AISearch.LLMDeadlineMillis = ms
+		} else {
+			log.Warn("AISEARCH_TIMEOUT_MS is not a positive integer, ignored", "value", raw)
+		}
+	}
 }
 
 func (c *AppConfig) LoadMapsConfig() {
