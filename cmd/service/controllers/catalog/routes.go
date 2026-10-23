@@ -2,12 +2,17 @@ package catalog
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/atharva-ng/crunch/internal/authz"
 	"github.com/atharva-ng/crunch/internal/config"
 	"github.com/atharva-ng/crunch/internal/middleware"
 	"github.com/atharva-ng/crunch/internal/services/catalogService"
 )
+
+// bulkApproveWriteTimeout is bulk approve's write deadline (the server
+// default is 60 s, config.DefaultWriteTimeout).
+const bulkApproveWriteTimeout = 5 * time.Minute
 
 // Handle registers the catalog routes (spec 03): admin listing lifecycle,
 // the Needs-info queue, media and geocoding under /v1/admin, and the public listing API under
@@ -137,12 +142,16 @@ func Handle(appCtx *config.AppContext) {
 		AllowCORS().
 		WithLogEnabled()
 
+	// Up to bulkApproveMax sequential approvals in one request: can outlast
+	// the server's WriteTimeout against a distant database, so this route
+	// gets its own deadline.
 	middleware.Handle("/v1/admin/revisions/bulk-approve", http.HandlerFunc(HandleBulkApprove)).
 		WithAdminAuthorization(authz.PermApprover).
 		WithJWTAuthentication().
 		With(middleware.DeserializeJson[bulkApproveRequest]()).
 		WithMethods(http.MethodPost).
 		With(appCtx.Middleware()).
+		With(middleware.ExtendWriteDeadline(bulkApproveWriteTimeout)).
 		AllowCORS().
 		WithLogEnabled()
 

@@ -178,11 +178,16 @@ func checkMinMax(name string, m domain.MinMax, allowNegative bool) error {
 // chipUnk checks a chip against the tree (spec 02 Projection format) and
 // returns the `unk` keys meaning "unknown" for it: the field path (if any)
 // and the node. Public search takes public + filterable only; admin any.
+// The Warehouse root has no chip of its own and its system fields are never
+// chips; fields added to the root are (domain.IsSystemRootField).
 func chipUnk(snap *domain.Snapshot, chip string, admin bool) ([]string, bool) {
 	path, opt, hasOpt := strings.Cut(chip, ":")
 	nodeKey, fieldKey, isField := strings.Cut(path, ".")
 	n, ok := snap.Node(nodeKey)
-	if !ok || n.Key == domain.RootKey || (!admin && !n.Public) {
+	if !ok || (!admin && !n.Public) {
+		return nil, false
+	}
+	if n.Key == domain.RootKey && (!isField || domain.IsSystemRootField(fieldKey)) {
 		return nil, false
 	}
 	if !isField {
@@ -204,10 +209,11 @@ func chipUnk(snap *domain.Snapshot, chip string, admin bool) ([]string, bool) {
 // rangeQuery maps a range filter on a numeric field to `nums` conditions.
 // A range-typed field stores <path>_min / <path>_max: min ⇒ its max ≥ min,
 // max ⇒ its min ≤ max ("can reach", 02). Public search takes public +
-// filterable fields only; admin any.
+// filterable fields only; admin any. The root's system fields are never
+// ranges (area and price have their own filters).
 func rangeQuery(snap *domain.Snapshot, path string, mm domain.MinMax, admin bool) (models.SearchRange, bool) {
 	n, f, ok := snap.Field(path)
-	if !ok || n.Key == domain.RootKey || (!admin && (!n.Public || !f.Public || !f.Filterable)) {
+	if !ok || (n.Key == domain.RootKey && domain.IsSystemRootField(f.Key)) || (!admin && (!n.Public || !f.Public || !f.Filterable)) {
 		return models.SearchRange{}, false
 	}
 	r := models.SearchRange{Unk: []string{path, n.Key}}

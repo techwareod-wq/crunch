@@ -29,3 +29,18 @@ func RootNode() models.AttributeNode {
 		},
 	}
 }
+
+// systemRootFields are RootNode's own field keys.
+var systemRootFields = func() map[string]bool {
+	m := map[string]bool{}
+	for _, f := range RootNode().Fields {
+		m[f.Key] = true
+	}
+	return m
+}()
+
+// IsSystemRootField reports whether key is one of the Warehouse root's
+// system fields (RootNode: name, address, location, total area, rent, …).
+// Search leaves these out (area and price have their own filters); fields
+// an admin adds to the root are searchable like any other node's.
+func IsSystemRootField(key string) bool { return systemRootFields[key] }

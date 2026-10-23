@@ -76,13 +76,18 @@ func chipLabel(snap *domain.Snapshot, c dto.Chip) string {
 	if !ok {
 		return c.Label
 	}
+	// Root fields need no "Warehouse ›" prefix (keeps the prompt short).
+	prefix := n.Name + " › "
+	if n.Key == domain.RootKey {
+		prefix = ""
+	}
 	field, _, isOpt := strings.Cut(rest, ":")
 	if isOpt {
 		if f, ok := n.Field(field); ok {
-			return n.Name + " › " + f.Name + ": " + c.Label
+			return prefix + f.Name + ": " + c.Label
 		}
 	}
-	return n.Name + " › " + c.Label
+	return prefix + c.Label
 }
 
 // synonyms lists a node chip's synonyms (AI vocabulary, spec 02).

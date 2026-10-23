@@ -119,6 +119,7 @@ func (s *svc) Search(ctx context.Context, req aiSearchService.Request, v searchS
 		ai.Parsed = true
 		b = fromExtraction(snap, ext, loc)
 	}
+	applyQueryRules(&b, q, h)
 	ai.Notes = append(ai.Notes, b.notes...)
 	b.filters.Text = q
 	b.filters.Page = req.Page

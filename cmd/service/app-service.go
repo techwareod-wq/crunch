@@ -90,7 +90,12 @@ func main() {
 	addr := ":" + appCtx.Config.Server.Port
 	log.Info("server starting", "addr", addr)
 
-	srv := &http.Server{Addr: addr, Handler: middleware.HostGuard(http.DefaultServeMux)}
+	sc := appCtx.Config.Server
+	log.Info("http timeouts", "readHeader", sc.ReadHeaderTimeout.String(), "read", sc.ReadTimeout.String(),
+		"write", sc.WriteTimeout.String(), "idle", sc.IdleTimeout.String())
+	srv := &http.Server{Addr: addr, Handler: middleware.HostGuard(http.DefaultServeMux),
+		ReadHeaderTimeout: sc.ReadHeaderTimeout, ReadTimeout: sc.ReadTimeout,
+		WriteTimeout: sc.WriteTimeout, IdleTimeout: sc.IdleTimeout}
 
 	// Shut down HTTP server when context is cancelled.
 	go func() {
