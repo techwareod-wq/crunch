@@ -67,6 +67,18 @@ func internalErr(w http.ResponseWriter, r *http.Request, msg string, err error) 
 	middleware.SendJSONError(w, r, apperrors.ErrInternal)
 }
 
+// queryErr answers a failed listings query: a query Mongo refused (built
+// from the request, e.g. the place regex) is the caller's 400; anything else
+// is a 500.
+func queryErr(w http.ResponseWriter, r *http.Request, msg string, err error) {
+	if queryRejected(err) {
+		middleware.GetLogger(r).Warn(msg+": query rejected", "error", err)
+		badRequest(w, r, "this place can't be searched")
+		return
+	}
+	internalErr(w, r, msg, err)
+}
+
 // HandleCities lists the cities that have live listings, sorted.
 func HandleCities(w http.ResponseWriter, r *http.Request) {
 	raw, err := models.Collection(collWarehouses).Distinct(r.Context(), "city", bson.M{"status": models.WarehouseLive})
@@ -93,6 +105,7 @@ func HandleSearch(w http.ResponseWriter, r *http.Request) {
 		middleware.SendJSONError(w, r, apperrors.ErrInvalidRequestBody)
 		return
 	}
+	req.rawPlace = rawTextOf(r).Place
 	q, msg := parseQuery(req)
 	if msg != "" {
 		badRequest(w, r, msg)
@@ -100,6 +113,11 @@ func HandleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	coll := models.Collection(collWarehouses)
 	resp := searchResponse{Results: []searchCard{}}
+	if q.PlaceGone {
+		resp.Message = msgPlaceCleanedAway
+		middleware.SendJSONResponse(w, r, http.StatusOK, resp)
+		return
+	}
 
 	// 1. Centroid of the place's live listings (no place = anywhere: no
 	// centroid, no radius, distKm null).
@@ -107,7 +125,7 @@ func HandleSearch(w http.ResponseWriter, r *http.Request) {
 		cur, err := coll.Find(r.Context(), bson.M{"status": models.WarehouseLive, "city": cityFilter(q.Place)},
 			options.Find().SetProjection(bson.M{"loc": 1}))
 		if err != nil {
-			internalErr(w, r, "finder: place lookup failed", err)
+			queryErr(w, r, "finder: place lookup failed", err)
 			return
 		}
 		var inCity []struct {
@@ -118,7 +136,7 @@ func HandleSearch(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if len(inCity) == 0 {
-			resp.Message = `We don't have live warehouses in "` + q.Place + `" yet.`
+			resp.Message = `We don't have live warehouses in "` + clip(q.Place) + `" yet.`
 			middleware.SendJSONResponse(w, r, http.StatusOK, resp)
 			return
 		}
@@ -132,7 +150,7 @@ func HandleSearch(w http.ResponseWriter, r *http.Request) {
 	// 2. Candidates (indexed prefilter), then every filter in Go.
 	cur, err := coll.Find(r.Context(), mongoFilter(q, resp.Centroid), options.Find().SetProjection(candidateProjection))
 	if err != nil {
-		internalErr(w, r, "finder: search query failed", err)
+		queryErr(w, r, "finder: search query failed", err)
 		return
 	}
 	var cs []candidate
@@ -162,6 +180,10 @@ func HandleSearch(w http.ResponseWriter, r *http.Request) {
 }
 
 // cardOf builds the result card; rate and coverUrl as the search cards do.
+// It does NOT check the tree's public flags at request time: every attribute
+// it shows is listed in PublicCardPaths, and cmd/seedwarehouses'
+// TestFinderCardFieldsArePublic fails if one of them stops being public. A
+// new card field must be added there too.
 func cardOf(h hit, mediaBase string) searchCard {
 	c := h.C
 	card := searchCard{

@@ -75,6 +75,7 @@ func (c matchCandidate) rent() *models.FieldValue {
 // criteria is a validated match request.
 type criteria struct {
 	City       string
+	CityGone   bool   // a city was sent but the sanitizer emptied it: no results
 	Type       string // "" = any
 	NeededSqm  float64
 	DG, Cold   bool

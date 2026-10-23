@@ -1,6 +1,7 @@
 package finder
 
 import (
+	"cmp"
 	"net/http"
 	"regexp"
 	"slices"
@@ -31,6 +32,10 @@ type matchRequest struct {
 	Industries []string `json:"industries"`
 	NearPort   bool     `json:"nearPort"`
 	NearRail   bool     `json:"nearRail"`
+
+	// rawCity is city as sent, before the shared sanitizer (set by the
+	// handler from captureRawText; see parsePlace).
+	rawCity string
 }
 
 // matchCard is one result, with the search card's field names and shapes.
@@ -61,9 +66,14 @@ func HandleMatch(w http.ResponseWriter, r *http.Request) {
 		middleware.SendJSONError(w, r, apperrors.ErrInvalidRequestBody)
 		return
 	}
+	req.rawCity = rawTextOf(r).City
 	q, msg := parseCriteria(req)
 	if msg != "" {
 		badRequest(w, r, msg)
+		return
+	}
+	if q.CityGone {
+		middleware.SendJSONResponse(w, r, http.StatusOK, matchResponse{Results: []matchCard{}, Message: msgPlaceCleanedAway})
 		return
 	}
 
@@ -73,7 +83,7 @@ func HandleMatch(w http.ResponseWriter, r *http.Request) {
 		"live.attributes.warehouse.fields.rent": 1,
 	}))
 	if err != nil {
-		internalErr(w, r, "finder: match query failed", err)
+		queryErr(w, r, "finder: match query failed", err)
 		return
 	}
 	var cs []matchCandidate
@@ -88,7 +98,7 @@ func HandleMatch(w http.ResponseWriter, r *http.Request) {
 		resp.Results = append(resp.Results, matchCardOf(s, base))
 	}
 	if len(resp.Results) == 0 {
-		resp.Message = "No live warehouses in " + q.City + " match that size and storage yet. " +
+		resp.Message = "No live warehouses in " + clip(q.City) + " match that size and storage yet. " +
 			"Try a smaller area, fewer storage needs or another type."
 	}
 	middleware.SendJSONResponse(w, r, http.StatusOK, resp)
@@ -96,10 +106,18 @@ func HandleMatch(w http.ResponseWriter, r *http.Request) {
 
 // parseCriteria validates req; a non-empty message is a 400.
 func parseCriteria(req matchRequest) (criteria, string) {
-	q := criteria{City: strings.TrimSpace(req.City), Type: strings.ToLower(strings.TrimSpace(req.Type)),
-		NearPort: req.NearPort, NearRail: req.NearRail}
-	if q.City == "" {
+	q := criteria{Type: strings.ToLower(strings.TrimSpace(req.Type)), NearPort: req.NearPort, NearRail: req.NearRail}
+	var msg string
+	if q.City, q.CityGone, msg = parsePlace("city", req.City, req.rawCity); msg != "" {
+		return q, msg
+	}
+	if q.City == "" && !q.CityGone {
 		return q, "city is required"
+	}
+	if msg := cmp.Or(checkNumber("areaSqft", req.AreaSqft, maxAreaSqft),
+		checkList("goods", len(req.Goods), maxGoods),
+		checkList("industries", len(req.Industries), maxIndustries)); msg != "" {
+		return q, msg
 	}
 	if q.Type != "" && typeLabels[q.Type] == "" {
 		return q, "type must be general, bonded, ftwz or empty"

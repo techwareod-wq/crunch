@@ -66,6 +66,24 @@ var features = []feature{
 	{"pharma", pharmaFit, "Pharma fit"},
 }
 
+// PublicCardPaths lists every attribute a search card shows, as tree paths
+// ("node.field", or a bare node key for a node chip): the root fields behind
+// name, city / locality, loc, totalSqm and rate, the type and number fields,
+// and each feature's chip (the pharma fit is an industry verdict, not a
+// field). See cardOf: the card relies on these all being public.
+func PublicCardPaths() []string {
+	paths := []string{
+		"warehouse.name", "warehouse.address", "warehouse.location", "warehouse.total_area", "warehouse.rent",
+		"warehouse.type", "building.clear_height", "docks.dock_doors", "warehouse.hold_capacity_mt",
+	}
+	for _, f := range features {
+		if f.Chip != pharmaFit {
+			paths = append(paths, f.Chip)
+		}
+	}
+	return paths
+}
+
 func featureOf(key string) (feature, bool) {
 	i := slices.IndexFunc(features, func(f feature) bool { return f.Key == key })
 	if i < 0 {
@@ -87,11 +105,16 @@ type searchRequest struct {
 	Features    []string `json:"features"`
 	Sort        string   `json:"sort"`
 	Limit       int      `json:"limit"`
+
+	// rawPlace is place as sent, before the shared sanitizer (set by the
+	// handler from captureRawText; see parsePlace).
+	rawPlace string
 }
 
 // query is a validated search.
 type query struct {
 	Place       string // "" = anywhere (no centroid, radius or distance)
+	PlaceGone   bool   // a place was sent but the sanitizer emptied it: no results
 	RadiusKm    int
 	AreaSqft    float64 // 0 = no area filter
 	Type        string  // "" = any
@@ -106,19 +129,28 @@ type query struct {
 
 // parseQuery validates req; a non-empty message is a 400.
 func parseQuery(req searchRequest) (query, string) {
-	q := query{Place: strings.TrimSpace(req.Place), RadiusKm: req.RadiusKm, AreaSqft: req.AreaSqft,
+	q := query{RadiusKm: req.RadiusKm, AreaSqft: req.AreaSqft,
 		Type: strings.ToLower(strings.TrimSpace(req.Type)), NearPort: req.NearPort, NearAirport: req.NearAirport,
 		NearRail: req.NearRail, Sort: strings.ToLower(strings.TrimSpace(req.Sort)), Limit: req.Limit}
+	var msg string
+	if q.Place, q.PlaceGone, msg = parsePlace("place", req.Place, req.rawPlace); msg != "" {
+		return q, msg
+	}
+	if msg := cmp.Or(checkNumber("areaSqft", req.AreaSqft, maxAreaSqft),
+		checkNumber("pallets", float64(req.Pallets), maxPallets),
+		checkList("features", len(req.Features), maxFeatures)); msg != "" {
+		return q, msg
+	}
 	switch {
 	case !slices.Contains(radii, q.RadiusKm):
 		return q, "radiusKm must be 0, 50 or 100"
-	case q.AreaSqft < 0 || req.Pallets < 0:
-		return q, "areaSqft and pallets can't be negative"
 	case q.Type != "" && !typeKeys[q.Type]:
 		return q, "type must be general, bonded, ftwz or empty"
 	}
+	// areaSqft wins when both are sent; pallets only size the area when no
+	// areaSqft is given. Both are capped above, so this can't overflow.
 	if q.AreaSqft == 0 && req.Pallets > 0 {
-		q.AreaSqft = float64(req.Pallets * sqftPerPallet)
+		q.AreaSqft = float64(req.Pallets) * sqftPerPallet
 	}
 	if q.Type != "" {
 		q.Chips = append(q.Chips, typeChipPrefix+q.Type)
@@ -126,7 +158,7 @@ func parseQuery(req searchRequest) (query, string) {
 	for _, key := range req.Features {
 		f, ok := featureOf(strings.ToLower(strings.TrimSpace(key)))
 		if !ok {
-			return q, "unknown feature " + `"` + key + `"`
+			return q, "unknown feature " + `"` + clip(key) + `"`
 		}
 		switch {
 		case f.Chip == pharmaFit:
