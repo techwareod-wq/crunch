@@ -14,6 +14,7 @@ import (
 	"github.com/atharva-ng/crunch/cmd/service/controllers/attributes"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/catalog"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/enquiries"
+	"github.com/atharva-ng/crunch/cmd/service/controllers/finder" // FINDER (remove to uninstall)
 	"github.com/atharva-ng/crunch/cmd/service/controllers/healthcheck"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/search"
 	"github.com/atharva-ng/crunch/cmd/service/controllers/users"
@@ -89,7 +90,12 @@ func main() {
 	addr := ":" + appCtx.Config.Server.Port
 	log.Info("server starting", "addr", addr)
 
-	srv := &http.Server{Addr: addr, Handler: middleware.HostGuard(http.DefaultServeMux)}
+	sc := appCtx.Config.Server
+	log.Info("http timeouts", "readHeader", sc.ReadHeaderTimeout.String(), "read", sc.ReadTimeout.String(),
+		"write", sc.WriteTimeout.String(), "idle", sc.IdleTimeout.String())
+	srv := &http.Server{Addr: addr, Handler: middleware.HostGuard(http.DefaultServeMux),
+		ReadHeaderTimeout: sc.ReadHeaderTimeout, ReadTimeout: sc.ReadTimeout,
+		WriteTimeout: sc.WriteTimeout, IdleTimeout: sc.IdleTimeout}
 
 	// Shut down HTTP server when context is cancelled.
 	go func() {
@@ -115,4 +121,5 @@ func loadAppAPIs(appCtx *config.AppContext) {
 	aisearch.Handle(appCtx)
 	enquiries.Handle(appCtx)
 	analytics.Handle(appCtx)
+	finder.Handle(appCtx) // FINDER (remove to uninstall)
 }

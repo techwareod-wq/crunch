@@ -17,8 +17,10 @@ const defaultRow = "Features"
 // (nodes, bool fields and pick/multi options, grouped by filterRow),
 // numeric range filters in canonical units, the same by attribute (groups),
 // industries, radius steps. Public: public + filterable only; admin: every
-// node and projectable field. The root's fields are left out: area and
-// price have their own filters.
+// node and projectable field. The root's system fields are left out (area
+// and price have their own filters) and the root has no chip of its own;
+// fields added to the root are listed like any node's (in a "Warehouse"
+// group).
 func (s *svc) Catalog(country string, admin bool) (dto.PublicCatalog, string) {
 	country = strings.ToUpper(strings.TrimSpace(country))
 	if country == "" {
@@ -53,10 +55,11 @@ func (s *svc) Catalog(country string, admin bool) (dto.PublicCatalog, string) {
 
 	for i := range snap.Nodes {
 		n := &snap.Nodes[i]
-		if n.Key == domain.RootKey || (!admin && !n.Public) {
+		if !admin && !n.Public {
 			continue
 		}
-		g := dto.FilterGroup{Key: n.Key, Name: n.Name, Selectable: admin || n.Filterable, Public: n.Public, Ancestors: []string{}, Fields: []dto.FilterField{}}
+		isRoot := n.Key == domain.RootKey
+		g := dto.FilterGroup{Key: n.Key, Name: n.Name, Selectable: !isRoot && (admin || n.Filterable), Public: n.Public, Ancestors: []string{}, Fields: []dto.FilterField{}}
 		for p, ok := snap.Node(n.ParentKey); ok && p.Key != domain.RootKey; p, ok = snap.Node(p.ParentKey) {
 			if g.ParentName == "" {
 				g.ParentName = p.Name
@@ -68,7 +71,7 @@ func (s *svc) Catalog(country string, admin bool) (dto.PublicCatalog, string) {
 		}
 		for j := range n.Fields {
 			f := &n.Fields[j]
-			if !domain.Projectable(f.Type) || (!admin && (!f.Public || !f.Filterable)) {
+			if !domain.Projectable(f.Type) || (isRoot && domain.IsSystemRootField(f.Key)) || (!admin && (!f.Public || !f.Filterable)) {
 				continue
 			}
 			path := n.Key + "." + f.Key

@@ -11,6 +11,7 @@ import (
 	"github.com/atharva-ng/crunch/internal/providers/impl/embed/voyage"
 	"github.com/atharva-ng/crunch/internal/providers/impl/geocode"
 	"github.com/atharva-ng/crunch/internal/providers/impl/llm/anthropic"
+	"github.com/atharva-ng/crunch/internal/providers/impl/llm/groq"
 	"github.com/atharva-ng/crunch/internal/providers/interfaces"
 	"github.com/atharva-ng/crunch/internal/services/accountService"
 	accountsvc "github.com/atharva-ng/crunch/internal/services/accountService/service"
@@ -108,10 +109,30 @@ func InjectDefaultServices(appCtx *config.AppContext) error {
 	// token-tracker gate; the service's deadline bounds the call (spec 05).
 	aiValues := appCtx.Config.Values.WarehouseHub.AISearch
 	var searchLLM interfaces.LlmService
-	if key := appCtx.Config.LLM.AnthropicAPIKey; key != "" {
-		llmValues := appCtx.Config.Values.LLM.Anthropic
-		searchLLM = anthropic.New(key, llmValues.APIURL, llmValues.APIVersion, aiValues.Model, aiValues.MaxTokens,
-			llmValues.RequestTimeoutSeconds, 1)
+	switch provider := appCtx.Config.LLM.AISearchProvider; provider {
+	case "groq":
+		// Groq's OpenAI-compatible API (free tier friendly); the model
+		// reported in ai.model becomes the Groq one.
+		aiValues.Model = appCtx.Config.LLM.GroqModel
+		if aiValues.Model == "" {
+			aiValues.Model = groq.DefaultModel
+		}
+		if key := appCtx.Config.LLM.GroqAPIKey; key != "" {
+			searchLLM = groq.New(key, groq.DefaultURL, aiValues.Model, appCtx.Config.LLM.GroqMode, aiValues.MaxTokens)
+			log.Info("AI search LLM: groq", "model", aiValues.Model, "mode", appCtx.Config.LLM.GroqMode,
+				"deadlineMs", aiValues.LLMDeadlineMillis)
+		} else {
+			log.Warn("AISEARCH_PROVIDER=groq but GROQ_API_KEY is empty: AI search runs the basic parse")
+		}
+	default:
+		if provider != "anthropic" {
+			log.Warn("unknown AISEARCH_PROVIDER, using anthropic", "provider", provider)
+		}
+		if key := appCtx.Config.LLM.AnthropicAPIKey; key != "" {
+			llmValues := appCtx.Config.Values.LLM.Anthropic
+			searchLLM = anthropic.New(key, llmValues.APIURL, llmValues.APIVersion, aiValues.Model, aiValues.MaxTokens,
+				llmValues.RequestTimeoutSeconds, 1)
+		}
 	}
 	var embedder interfaces.Embedder
 	if key := appCtx.Config.LLM.VoyageAPIKey; key != "" {

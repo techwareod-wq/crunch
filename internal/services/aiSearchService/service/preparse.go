@@ -22,6 +22,14 @@ type hints struct {
 	Pincode string
 	Area    *areaHint
 	Price   *priceHint
+	// Pallets is a pallet count ("200 pallets"), sized in Go after the
+	// parse (applyQueryRules); not sent to the model.
+	Pallets *palletHint
+}
+
+type palletHint struct {
+	Count  float64
+	Intent string
 }
 
 type areaHint struct {
@@ -44,6 +52,7 @@ var (
 	reMoneyWord = regexp.MustCompile(`(?i)\b(\d[\d,]*(?:\.\d+)?)\s*(lakhs?|lacs?|crores?|cr)\b`)
 	reBasis     = regexp.MustCompile(`(?i)^\s*(?:/|per\s+|a\s+)?\s*(sq\.?\s*ft\.?|sqft|sft|square\s+f(?:ee|oo)t|sq\.?\s*m\.?|sqm|square\s+met(?:er|re)s?|month|mo|pm)\b`)
 	rePincode   = regexp.MustCompile(`\b[1-9]\d{5}\b`)
+	rePallets   = regexp.MustCompile(`(?i)(\d[\d,]*(?:\.\d+)?)\s*(k)?\s*pallets?\b`)
 
 	reMin    = regexp.MustCompile(`(?i)(at\s*least|atleast|min(?:imum)?|above|more\s+than|over|\bfrom)\s*$`)
 	reMax    = regexp.MustCompile(`(?i)(under|up\s*to|upto|max(?:imum)?|less\s+than|below|within|budget(?:\s+of)?)\s*$`)
@@ -71,6 +80,17 @@ func preparse(q string) hints {
 				v *= 1000
 			}
 			h.Area = &areaHint{Value: v, Unit: areaUnit(q[m[6]:m[7]]), Intent: qualifier(q[:m[0]], intentMin)}
+			mask(m[0], m[1])
+		}
+	}
+
+	if m := rePallets.FindStringSubmatchIndex(string(masked)); m != nil {
+		text := string(masked)
+		if v, err := parseNumber(text[m[2]:m[3]]); err == nil && v > 0 {
+			if m[4] >= 0 {
+				v *= 1000
+			}
+			h.Pallets = &palletHint{Count: v, Intent: qualifier(text[:m[0]], intentMin)}
 			mask(m[0], m[1])
 		}
 	}

@@ -18,7 +18,10 @@ func Handle(appCtx *config.AppContext) {
 		return
 	}
 
+	// Per-user rate limit (ratelimit.go): chained first so it runs after
+	// sign-in and the feature check.
 	middleware.Handle("/v1/public/search/ai", http.HandlerFunc(HandleSearch)).
+		With(userLimiterFromEnv().middleware).
 		WithFeature(authz.FeatureAISearch).
 		WithJWTAuthentication().
 		With(middleware.DeserializeJson[aiSearchService.Request]()).

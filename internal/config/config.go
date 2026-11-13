@@ -42,7 +42,22 @@ type ServerConfig struct {
 	// when set, requests whose Host is not listed are rejected (see
 	// middleware.HostGuard). Production lists the public API host.
 	AllowedHosts []string
+	// HTTP server timeouts (see LoadHTTPTimeouts). A route that may
+	// legitimately run longer extends its own write deadline
+	// (middleware.ExtendWriteDeadline).
+	ReadHeaderTimeout time.Duration
+	ReadTimeout       time.Duration
+	WriteTimeout      time.Duration
+	IdleTimeout       time.Duration
 }
+
+// Default HTTP server timeouts.
+const (
+	DefaultReadHeaderTimeout = 10 * time.Second
+	DefaultReadTimeout       = 30 * time.Second
+	DefaultWriteTimeout      = 60 * time.Second
+	DefaultIdleTimeout       = 120 * time.Second
+)
 
 type ClerkConfig struct {
 	SecretKey     string
@@ -80,6 +95,14 @@ type LLMConfig struct {
 	AnthropicAPIKey string
 	// VoyageAPIKey enables embeddings (AI search similar matches, D-082).
 	VoyageAPIKey string
+	// AISearchProvider picks AI search's extraction LLM: "anthropic"
+	// (default) or "groq".
+	AISearchProvider string
+	// GroqAPIKey / GroqModel configure the Groq provider. GroqMode is how
+	// it makes the forced extraction call: "json" (default) or "tool".
+	GroqAPIKey string
+	GroqModel  string
+	GroqMode   string
 }
 
 type SQSConfig struct {
@@ -131,6 +154,36 @@ func (c *AppConfig) LoadServerConfig() {
 	if envHosts := parseCSV(os.Getenv("ALLOWED_HOSTS")); len(envHosts) > 0 {
 		c.Server.AllowedHosts = envHosts
 	}
+	c.LoadHTTPTimeouts()
+}
+
+// LoadHTTPTimeouts sets the http.Server timeouts from HTTP_READ_HEADER_TIMEOUT,
+// HTTP_READ_TIMEOUT, HTTP_WRITE_TIMEOUT and HTTP_IDLE_TIMEOUT (a Go duration
+// such as "45s" or "2m", or whole seconds such as "45"), each falling back to
+// its default when unset or invalid.
+func (c *AppConfig) LoadHTTPTimeouts() {
+	c.Server.ReadHeaderTimeout = durationEnv("HTTP_READ_HEADER_TIMEOUT", os.Getenv("HTTP_READ_HEADER_TIMEOUT"), DefaultReadHeaderTimeout)
+	c.Server.ReadTimeout = durationEnv("HTTP_READ_TIMEOUT", os.Getenv("HTTP_READ_TIMEOUT"), DefaultReadTimeout)
+	c.Server.WriteTimeout = durationEnv("HTTP_WRITE_TIMEOUT", os.Getenv("HTTP_WRITE_TIMEOUT"), DefaultWriteTimeout)
+	c.Server.IdleTimeout = durationEnv("HTTP_IDLE_TIMEOUT", os.Getenv("HTTP_IDLE_TIMEOUT"), DefaultIdleTimeout)
+}
+
+// durationEnv parses raw (the value of env var name) as a positive Go
+// duration or whole seconds; empty or invalid returns def (invalid is logged).
+func durationEnv(name, raw string, def time.Duration) time.Duration {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return def
+	}
+	if _, err := strconv.Atoi(raw); err == nil {
+		raw += "s"
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		log.Warn("invalid duration env override, using default", "var", name, "value", raw, "default", def.String())
+		return def
+	}
+	return d
 }
 
 // LoadSiteConfig lets the deploy set the public site / admin panel origins
@@ -212,6 +265,26 @@ func (c *EnvConfig) IsDev() bool {
 func (c *AppConfig) LoadLLMConfig() {
 	c.LLM.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
 	c.LLM.VoyageAPIKey = os.Getenv("VOYAGE_API_KEY")
+
+	c.LLM.AISearchProvider = strings.ToLower(strings.TrimSpace(os.Getenv("AISEARCH_PROVIDER")))
+	if c.LLM.AISearchProvider == "" {
+		c.LLM.AISearchProvider = "anthropic"
+	}
+	c.LLM.GroqAPIKey = os.Getenv("GROQ_API_KEY")
+	c.LLM.GroqModel = strings.TrimSpace(os.Getenv("AISEARCH_GROQ_MODEL"))
+	c.LLM.GroqMode = "json"
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("AISEARCH_GROQ_MODE")), "tool") {
+		c.LLM.GroqMode = "tool"
+	}
+
+	// AISEARCH_TIMEOUT_MS overrides warehousehub.aisearch.llmDeadlineMillis.
+	if raw := strings.TrimSpace(os.Getenv("AISEARCH_TIMEOUT_MS")); raw != "" {
+		if ms, err := strconv.Atoi(raw); err == nil && ms > 0 {
+			c.Values.WarehouseHub.AISearch.LLMDeadlineMillis = ms
+		} else {
+			log.Warn("AISEARCH_TIMEOUT_MS is not a positive integer, ignored", "value", raw)
+		}
+	}
 }
 
 func (c *AppConfig) LoadMapsConfig() {
