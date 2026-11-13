@@ -8,14 +8,11 @@ RUN apk add --no-cache git ca-certificates tzdata
 WORKDIR /src
 
 COPY go.mod go.sum ./
-RUN --mount=type=cache,target=/go/pkg/mod \
-    go mod download
+RUN go mod download
 
 COPY . .
 
-RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=linux \
+RUN CGO_ENABLED=0 GOOS=linux \
     go build -trimpath -ldflags="-s -w" -o /out/crunch ./cmd/service
 
 # ---------- Runtime stage ----------
