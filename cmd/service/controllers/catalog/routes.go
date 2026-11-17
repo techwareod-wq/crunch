@@ -7,6 +7,7 @@ import (
 	"github.com/atharva-ng/crunch/internal/authz"
 	"github.com/atharva-ng/crunch/internal/config"
 	"github.com/atharva-ng/crunch/internal/middleware"
+	"github.com/atharva-ng/crunch/internal/ratelimit"
 	"github.com/atharva-ng/crunch/internal/services/catalogService"
 )
 
@@ -16,8 +17,9 @@ const bulkApproveWriteTimeout = 5 * time.Minute
 
 // Handle registers the catalog routes (spec 03): admin listing lifecycle,
 // the Needs-info queue, media and geocoding under /v1/admin, and the public listing API under
-// /v1/public (open to anonymous visitors, allowlisted DTOs).
-func Handle(appCtx *config.AppContext) {
+// /v1/public (open to anonymous visitors behind the shared per-IP
+// publicLimit, allowlisted DTOs).
+func Handle(appCtx *config.AppContext, publicLimit *ratelimit.Limiter) {
 	middleware.Handle("/v1/admin/warehouses", http.HandlerFunc(HandleList)).
 		WithAdminAuthorization().
 		WithJWTAuthentication().
@@ -244,6 +246,7 @@ func Handle(appCtx *config.AppContext) {
 		WithOptionalJWT().
 		WithMethods(http.MethodGet).
 		With(appCtx.Middleware()).
+		With(publicLimit.Middleware).
 		AllowCORS().
 		WithLogEnabled()
 
@@ -251,6 +254,7 @@ func Handle(appCtx *config.AppContext) {
 		WithOptionalJWT().
 		WithMethods(http.MethodGet).
 		With(appCtx.Middleware()).
+		With(publicLimit.Middleware).
 		AllowCORS().
 		WithLogEnabled()
 
@@ -258,6 +262,7 @@ func Handle(appCtx *config.AppContext) {
 		WithOptionalJWT().
 		WithMethods(http.MethodGet).
 		With(appCtx.Middleware()).
+		With(publicLimit.Middleware).
 		AllowCORS().
 		WithLogEnabled()
 }

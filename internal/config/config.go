@@ -119,6 +119,33 @@ type AsyncHandlerConfig struct {
 	ShutdownTimeout time.Duration
 }
 
+// RateLimitConfig is the per-IP limit on the anonymous /v1/public search and
+// listing routes (internal/ratelimit). The finder keeps its own FINDER_*
+// budget but shares ProxySecret.
+type RateLimitConfig struct {
+	// ProxySecret is shared with the frontend's server-side proxy, which
+	// sends it (X-WH-Proxy-Secret) with the visitor's IP (X-WH-Client-IP).
+	// Empty trusts no forwarded client IP: behind the proxy every visitor
+	// then shares one bucket.
+	ProxySecret string
+	// TrustProxyHeaders takes the client IP from CF-Connecting-IP /
+	// X-Forwarded-For for direct callers. Only behind a proxy that sets them.
+	TrustProxyHeaders bool
+	// PublicPerMin / PublicBurst: one budget across the public routes.
+	PublicPerMin int
+	PublicBurst  int
+}
+
+// Defaults for the public route limit: generous enough for fast browsing
+// (an Explore session fires a search + map call per filter change), low
+// enough that one IP can't walk the catalog.
+const (
+	DefaultPublicRatePerMin = 120
+	DefaultPublicRateBurst  = 60
+	// minProxySecretLen is the length under which a set secret is warned about.
+	minProxySecretLen = 32
+)
+
 type AppConfig struct {
 	Database     DatabaseConfig
 	Server       ServerConfig
@@ -129,6 +156,7 @@ type AppConfig struct {
 	Maps         MapsConfig
 	SQS          SQSConfig
 	AsyncHandler AsyncHandlerConfig
+	RateLimit    RateLimitConfig
 	// Values holds the YAML-sourced runtime tunables + external API URLs. The
 	// loaders below read it as their default layer (env vars still override).
 	Values Values
@@ -155,6 +183,27 @@ func (c *AppConfig) LoadServerConfig() {
 		c.Server.AllowedHosts = envHosts
 	}
 	c.LoadHTTPTimeouts()
+}
+
+// LoadRateLimitConfig reads PROXY_SHARED_SECRET, TRUST_PROXY_HEADERS,
+// PUBLIC_RATE_PER_MIN and PUBLIC_RATE_BURST (unset or invalid → default).
+func (c *AppConfig) LoadRateLimitConfig() {
+	c.RateLimit.ProxySecret = strings.TrimSpace(os.Getenv("PROXY_SHARED_SECRET"))
+	c.RateLimit.TrustProxyHeaders, _ = strconv.ParseBool(strings.TrimSpace(os.Getenv("TRUST_PROXY_HEADERS")))
+	c.RateLimit.PublicPerMin = DefaultPublicRatePerMin
+	if n := atoiEnv("PUBLIC_RATE_PER_MIN"); n > 0 {
+		c.RateLimit.PublicPerMin = n
+	}
+	c.RateLimit.PublicBurst = DefaultPublicRateBurst
+	if n := atoiEnv("PUBLIC_RATE_BURST"); n > 0 {
+		c.RateLimit.PublicBurst = n
+	}
+	switch {
+	case c.RateLimit.ProxySecret == "" && c.Env.IsProd():
+		log.Warn("PROXY_SHARED_SECRET is not set: visitors behind the frontend proxy share one rate-limit bucket")
+	case c.RateLimit.ProxySecret != "" && len(c.RateLimit.ProxySecret) < minProxySecretLen:
+		log.Warn("PROXY_SHARED_SECRET is short; use at least 32 random characters", "length", len(c.RateLimit.ProxySecret))
+	}
 }
 
 // LoadHTTPTimeouts sets the http.Server timeouts from HTTP_READ_HEADER_TIMEOUT,
@@ -349,6 +398,7 @@ func LoadConfigFromEnv(c *AppConfig) error {
 	}
 	c.LoadDatabaseConfig()
 	c.LoadServerConfig()
+	c.LoadRateLimitConfig()
 	c.LoadSiteConfig()
 	c.LoadClerkConfig()
 	c.LoadAWSConfig()

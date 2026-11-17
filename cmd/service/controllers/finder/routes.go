@@ -17,13 +17,13 @@ import (
 // one per-IP rate limit (ratelimit.go). Search and match keep the raw
 // place / city before the shared deserializer sanitizes it (validate.go).
 func Handle(appCtx *config.AppContext) {
-	limit := limiterFromEnv()
+	limit := limiterFromEnv(appCtx.Config.RateLimit.ProxySecret)
 
 	middleware.Handle("/v1/public/finder/cities", http.HandlerFunc(HandleCities)).
 		WithOptionalJWT().
 		WithMethods(http.MethodGet).
 		With(appCtx.Middleware()).
-		With(limit.middleware).
+		With(limit.Middleware).
 		AllowCORS().
 		WithLogEnabled()
 
@@ -33,7 +33,7 @@ func Handle(appCtx *config.AppContext) {
 		With(captureRawText).
 		WithMethods(http.MethodPost).
 		With(appCtx.Middleware()).
-		With(limit.middleware).
+		With(limit.Middleware).
 		AllowCORS().
 		WithLogEnabled()
 
@@ -43,7 +43,7 @@ func Handle(appCtx *config.AppContext) {
 		With(captureRawText).
 		WithMethods(http.MethodPost).
 		With(appCtx.Middleware()).
-		With(limit.middleware).
+		With(limit.Middleware).
 		AllowCORS().
 		WithLogEnabled()
 }

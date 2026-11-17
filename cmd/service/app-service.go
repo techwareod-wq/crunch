@@ -22,6 +22,7 @@ import (
 	"github.com/atharva-ng/crunch/cmd/service/providers"
 	"github.com/atharva-ng/crunch/internal/config"
 	"github.com/atharva-ng/crunch/internal/middleware"
+	"github.com/atharva-ng/crunch/internal/ratelimit"
 	"github.com/atharva-ng/crunch/internal/util/log"
 )
 
@@ -116,8 +117,12 @@ func loadAppAPIs(appCtx *config.AppContext) {
 	webhooks.Handle(appCtx)
 	admin.Handle(appCtx)
 	attributes.Handle(appCtx)
-	catalog.Handle(appCtx)
-	search.Handle(appCtx)
+	// One per-IP budget shared by the anonymous search and listing routes.
+	rl := appCtx.Config.RateLimit
+	publicLimit := ratelimit.New(rl.PublicPerMin, rl.PublicBurst,
+		ratelimit.Resolver{ProxySecret: rl.ProxySecret, TrustProxyHeaders: rl.TrustProxyHeaders}.Key)
+	catalog.Handle(appCtx, publicLimit)
+	search.Handle(appCtx, publicLimit)
 	aisearch.Handle(appCtx)
 	enquiries.Handle(appCtx)
 	analytics.Handle(appCtx)
