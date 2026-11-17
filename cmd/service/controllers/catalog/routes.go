@@ -16,7 +16,7 @@ const bulkApproveWriteTimeout = 5 * time.Minute
 
 // Handle registers the catalog routes (spec 03): admin listing lifecycle,
 // the Needs-info queue, media and geocoding under /v1/admin, and the public listing API under
-// /v1/public (sign-in plus the listings feature, allowlisted DTOs).
+// /v1/public (open to anonymous visitors, allowlisted DTOs).
 func Handle(appCtx *config.AppContext) {
 	middleware.Handle("/v1/admin/warehouses", http.HandlerFunc(HandleList)).
 		WithAdminAuthorization().
@@ -241,24 +241,21 @@ func Handle(appCtx *config.AppContext) {
 		WithLogEnabled()
 
 	middleware.Handle("/v1/public/listing", http.HandlerFunc(HandlePublicListing)).
-		WithFeature(authz.FeatureListings).
-		WithJWTAuthentication().
+		WithOptionalJWT().
 		WithMethods(http.MethodGet).
 		With(appCtx.Middleware()).
 		AllowCORS().
 		WithLogEnabled()
 
 	middleware.Handle("/v1/public/listing/slugs", HandlePublicSlugs(false)).
-		WithFeature(authz.FeatureListings).
-		WithJWTAuthentication().
+		WithOptionalJWT().
 		WithMethods(http.MethodGet).
 		With(appCtx.Middleware()).
 		AllowCORS().
 		WithLogEnabled()
 
 	middleware.Handle("/v1/public/sitemap", HandlePublicSlugs(true)).
-		WithFeature(authz.FeatureListings).
-		WithJWTAuthentication().
+		WithOptionalJWT().
 		WithMethods(http.MethodGet).
 		With(appCtx.Middleware()).
 		AllowCORS().
